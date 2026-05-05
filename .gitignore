@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+node_modules/
+# runtime state
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+# editor
+.idea/
+.vscode/
+.DS_Store
