@@ -1,0 +1,36 @@
+[project]
+name = "wagame"
+version = "0.0.1"
+description = "Discord-native idle/RPG bot inspired by Witch Arcana."
+requires-python = ">=3.11"
+dependencies = [
+    "discord.py>=2.4,<3",
+    "aiosqlite>=0.20",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["wagame*"]
+exclude = ["tests*", "data*", "migrations*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
