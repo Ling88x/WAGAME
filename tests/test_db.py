@@ -26,11 +26,15 @@ async def test_migration_records_version(db: Database) -> None:
 
 
 async def test_migration_is_idempotent(db: Database) -> None:
+    async with db.conn.execute("SELECT COUNT(*) FROM schema_version") as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    initial = row[0]
     await db.migrate()
     async with db.conn.execute("SELECT COUNT(*) FROM schema_version") as cur:
         row = await cur.fetchone()
     assert row is not None
-    assert row[0] == 1
+    assert row[0] == initial
 
 
 async def test_get_or_create_player_creates_row(db: Database) -> None:

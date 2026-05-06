@@ -1,0 +1,41 @@
+{
+  "_meta": {
+    "version": 1,
+    "source": "kohqs.com/wa/heroes",
+    "note": "Initial sample only. Run `python -m wagame.tools.scrape_kohqs` on a host with internet access to populate the full roster. Schema may need correcting once the real fields are visible (rarity vocabulary, element/house labels, terrain names)."
+  },
+  "heroes": [
+    {
+      "codename": "ghostpink",
+      "name": "Roselda Graves",
+      "rarity": "rare",
+      "element": null,
+      "house": "Serpentanima",
+      "terrain": "forest",
+      "release_date": "2026-02",
+      "bonuses": [
+        "Highlands Node Tactics Bonus",
+        "Forest Node Tactics Bonus",
+        "Forest Hero March Speed Boost",
+        "Forest Ripple Raid Tenebral Attacker Bonus",
+        "Highlands Fury Hunter Tactics Bonus",
+        "Forest Raid Gathering Rate Bonus"
+      ],
+      "tags": ["cool"]
+    },
+    {
+      "codename": "waterlava",
+      "name": "Lyria Ignis",
+      "rarity": "rare",
+      "element": null,
+      "house": null,
+      "terrain": "hexlands",
+      "release_date": "2025-11",
+      "bonuses": [
+        "PVP",
+        "Fury Attack"
+      ],
+      "tags": ["cool"]
+    }
+  ]
+}

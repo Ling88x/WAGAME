@@ -9,7 +9,7 @@ __pycache__/
 venv/
 node_modules/
 # runtime state
-data/
+/data/
 *.db
 *.db-journal
 *.sqlite
