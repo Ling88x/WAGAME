@@ -14,8 +14,8 @@ edit as a discussion with the user.
 | #1 | Foundations       | ✅ shipped | discord.py + aiosqlite scaffold, `/profile`, `/admin grant`/`reset` |
 | #2 | Heroes catalog    | ✅ shipped | 40 heroes seeded from kohqs.com; `/heroes`, `/hero`, `/admin grant-hero` |
 | #3 | Gathering         | ✅ shipped | 2 starting marches (cap 6 via future research), 30 min, fixed yield + 5% crit ×2, gold leaner than food/wood |
-| #4 | Summoning Gate    | 🚧 in flight | Troop training, 1 queue, food-only cost, T1 only at start (research will unlock T2–T4) |
-| #5 | Research tree     | ⏳ pending | Unlocks higher troop tiers, queue cap / speed boost, march slots, march speed, gather yield |
+| #4 | Summoning Gate    | ✅ shipped | Troop training, 1 queue, food-only cost, T1 only at start (research unlocks T2–T4) |
+| #5 | Research tree     | ✅ shipped | 8 nodes across Economy / Military / Logistics, 1 slot, gold-only cost, auto-apply on completion |
 | #6 | Combat            | ⏳ pending | Auto-battler loosely based on in-game WA; element triangle TBD; troops + commander hero per side |
 | #7 | Raids             | ⏳ pending | Solo PvE first (R1–R6 → void vesps → dominion boss). Energy gated. PvP raids later |
 | #8 | Daily / progression | ⏳ pending | Login rewards, streaks, account-wide XP — defer until PvE feels good |
@@ -54,7 +54,28 @@ These were pinned by the user; treat as contract.
 
 ---
 
-## Numbers snapshot (PR #4 — Summoning Gate, proposed)
+## Numbers snapshot (PR #5 — Research)
+
+8 nodes, one in-flight job per player, gold-only cost. Each completed
+level adds `effect_per_level` to a single player column.
+
+| Track     | Node              | Max lvl | Per level             | Effect column                | Prereq                |
+|-----------|-------------------|---------|------------------------|------------------------------|------------------------|
+| Economy   | Gather Yield      | 5       | +5% yield              | gather_yield_pct             | —                      |
+| Economy   | Gather Speed      | 5       | −3% gather duration    | gather_speed_pct             | —                      |
+| Economy   | Summoning Queue   | 5       | +50 batch cap          | training_queue_cap           | —                      |
+| Economy   | Summoning Speed   | 5       | +3% training speed     | training_speed_boost_pct     | Summoning Queue Lv 2  |
+| Military  | Higher Tier Summons | 3     | +1 troop tier (T2–T4)  | unlocked_tier                | —                      |
+| Military  | Troop Attack      | 5       | +5% combat ATK         | troop_attack_pct             | Higher Tier Lv 1      |
+| Military  | Troop HP          | 5       | +5% combat HP          | troop_hp_pct                 | Higher Tier Lv 1      |
+| Logistics | March Slots       | 4       | +1 march slot (2 → 6)  | march_capacity               | —                      |
+
+Gold costs and durations escalate roughly 2× per level; full tables live
+in `wagame/research_data.py`.
+
+---
+
+## Numbers snapshot (PR #4 — Summoning Gate)
 
 Rounded values from the in-game screens. Game-side numbers are gigantic
 (L25 queue = 42k, L30 = 192k) — we scale down for bot scope.
@@ -98,12 +119,14 @@ Each item is something the user has mentioned but we agreed to defer.
 When the relevant PR comes up, raise the item and ask whether to fold it in.
 
 ### Soon (next 1–2 PRs)
-- **Research tree (PR #5).** Source of truth for: troop tier unlocks, queue
-  cap, training speed boost, gather march slots (2 → 6), gather march speed,
-  yield bonuses, hero levelup costs. Shape (tree / grid / linear) — TBD.
 - **Combat (PR #6).** Loosely Heckfire-like auto-battler. Hero commander +
   troops on each side. Element triangle TBD. Open question: rendering — tick
-  log vs result screen.
+  log vs result screen. Reads `troop_attack_pct` / `troop_hp_pct` already
+  populated by research.
+- **Wood needs a sink.** Research is gold-only by user's call. Food is
+  consumed by Summoning Gate, gold by research. Wood is still produced by
+  gather but consumed by nothing — likely role for future buildings system
+  or a second research currency tier. Revisit when buildings come up.
 
 ### Medium term
 - **Gather refactor — troops as gatherers.** Description in-game:

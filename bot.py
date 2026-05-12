@@ -20,6 +20,7 @@ INITIAL_COGS = (
     "wagame.cogs.heroes",
     "wagame.cogs.gather",
     "wagame.cogs.summon",
+    "wagame.cogs.research",
 )
 
 

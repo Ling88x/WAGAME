@@ -215,6 +215,73 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="set-research",
+        description="Force-set a player's research level for a node (owner only).",
+    )
+    @app_commands.describe(
+        node="Research node codename (see wagame/research_data.py).",
+        level="Target level (0 to clear, up to the node's max).",
+        user="Target player. Defaults to you.",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def set_research(
+        self,
+        interaction: discord.Interaction,
+        node: str,
+        level: int,
+        user: discord.User | None = None,
+    ) -> None:
+        from wagame.cogs.research import ALLOWED_EFFECT_COLUMNS
+        from wagame.research_data import get_node
+
+        node_spec = get_node(node.strip().lower())
+        if node_spec is None:
+            await interaction.response.send_message(
+                f"No research node `{node}`.", ephemeral=True
+            )
+            return
+        if level < 0 or level > node_spec.max_level:
+            await interaction.response.send_message(
+                f"Level must be in [0, {node_spec.max_level}].", ephemeral=True
+            )
+            return
+        if node_spec.effect_column not in ALLOWED_EFFECT_COLUMNS:
+            await interaction.response.send_message(
+                "Node targets a non-whitelisted column. Refusing.", ephemeral=True
+            )
+            return
+
+        target = user or interaction.user
+        await self.db.get_or_create_player(target.id)
+        async with self.db.conn.execute(
+            "SELECT level FROM player_research WHERE discord_user_id = ? AND node_codename = ?",
+            (target.id, node_spec.codename),
+        ) as cur:
+            row = await cur.fetchone()
+        previous = int(row["level"]) if row else 0
+        delta = (level - previous) * node_spec.effect_per_level
+
+        await self.db.conn.execute(
+            """
+            INSERT INTO player_research (discord_user_id, node_codename, level)
+            VALUES (?, ?, ?)
+            ON CONFLICT(discord_user_id, node_codename) DO UPDATE SET level = excluded.level
+            """,
+            (target.id, node_spec.codename, level),
+        )
+        await self.db.conn.execute(
+            f"UPDATE players SET {node_spec.effect_column} = {node_spec.effect_column} + ? "
+            "WHERE discord_user_id = ?",
+            (delta, target.id),
+        )
+        await self.db.conn.commit()
+        await interaction.response.send_message(
+            f"{target.mention}: {node_spec.name} -> Lv {level} "
+            f"(delta on `{node_spec.effect_column}`: {delta:+d}).",
+            ephemeral=True,
+        )
+
     async def cog_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:

@@ -73,15 +73,20 @@ async def _start_gather(db: Database, user_id: int, resource: Resource) -> tuple
         return False, f"All {capacity} march slot(s) busy — claim a finished gather first."
 
     roll = roll_gather(resource)
+    yield_pct = int(player["gather_yield_pct"])
+    speed_pct = int(player["gather_speed_pct"])
+    # Apply research bonuses at start time so the row is fully determined.
+    boosted_base = int(roll.base * (100 + yield_pct) / 100)
+    duration = max(1, int(GATHER_DURATION_SECONDS * (100 - min(99, speed_pct)) / 100))
     now = int(time.time())
-    finishes_at = now + GATHER_DURATION_SECONDS
+    finishes_at = now + duration
     await db.conn.execute(
         """
         INSERT INTO marches (discord_user_id, resource, started_at, finishes_at,
                              yield_amount, crit)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (user_id, resource, now, finishes_at, roll.base, 1 if roll.crit else 0),
+        (user_id, resource, now, finishes_at, boosted_base, 1 if roll.crit else 0),
     )
     await db.conn.commit()
     return True, f"Sent a march to gather {resource}."

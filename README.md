@@ -8,7 +8,7 @@ collect heroes, research upgrades, gather resources and fight raids.
 > It defines scope, design constraints, what to ask the user before writing code,
 > and the relationship to the sibling project `wahelper` (hourly-quest helper).
 
-Status: **Summoning Gate live — T1 troops trainable, one queue at a time, food-only cost. Higher tiers + queue scaling come with the research PR. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan.**
+Status: **Research tree live — 8 nodes across Economy / Military / Logistics. Spend gold, wait out the timer, bonus auto-applies (gather yield/speed, troop tiers, march slots, etc.). Combat / raids next. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan.**
 
 ## Stack
 
@@ -47,6 +47,11 @@ Logs land in `data/wagame.log` (rotating) and stdout.
   city when the timer ends. Cost is food only. Tiers beyond T1 are gated
   behind research.
 - `/army` — list the troops in your city, grouped by tier (ephemeral).
+- `/research` — ephemeral panel with all 8 research nodes (Economy / Military
+  / Logistics), one job in flight at a time, bonuses auto-apply when the
+  timer ends. Cost is gold only; gather_yield/gather_speed scale the gather
+  rolls, training nodes scale the Summoning Gate, march slots and troop
+  tiers raise the relevant caps.
 - `/admin grant user:<@user> gold:<n> food:<n> wood:<n>` — owner only.
 - `/admin reset user:<@user>` — owner only; wipes the row.
 - `/admin grant-hero codename:<slug> user:<@user> level:<n>` — owner only;
@@ -57,6 +62,9 @@ Logs land in `data/wagame.log` (rotating) and stdout.
   player's max trainable troop tier (research PR will replace this).
 - `/admin set-queue-cap cap:<n> user:<@user>` — owner only.
 - `/admin set-train-speed percent:<0-99> user:<@user>` — owner only.
+- `/admin set-research node:<codename> level:<n> user:<@user>` — owner only;
+  force-set a research node's level for a player (re-applies the bonus
+  delta on the relevant player column). Useful for testing.
 
 ## Heroes catalog
 
@@ -84,6 +92,7 @@ wagame/
   db.py                     async SQLite + migration runner
   heroes_data.py            heroes seed loader + sync_heroes()
   troops_data.py            troops seed loader + sync_troops()
+  research_data.py          static research node catalog
   cogs/                     discord.py cogs (one per system, eventually)
   game/                     pure logic — testable without Discord
   data/                     static seeds (heroes.json, …)
