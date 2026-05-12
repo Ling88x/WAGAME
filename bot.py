@@ -12,12 +12,14 @@ from discord.ext import commands
 from wagame.config import REPO_ROOT, Config
 from wagame.db import Database
 from wagame.heroes_data import sync_heroes
+from wagame.troops_data import sync_troops
 
 INITIAL_COGS = (
     "wagame.cogs.profile",
     "wagame.cogs.admin",
     "wagame.cogs.heroes",
     "wagame.cogs.gather",
+    "wagame.cogs.summon",
 )
 
 
@@ -53,6 +55,7 @@ class WaBot(commands.Bot):
         await self.db.connect()
         await self.db.migrate()
         await sync_heroes(self.db)
+        await sync_troops(self.db)
         for ext in INITIAL_COGS:
             await self.load_extension(ext)
 

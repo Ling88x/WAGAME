@@ -122,6 +122,99 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
             ephemeral=True,
         )
 
+    @app_commands.command(
+        name="unlock-tier",
+        description="Set a player's max trainable troop tier (owner only).",
+    )
+    @app_commands.describe(
+        tier="Highest tier the player can train (1-4).",
+        user="Target player. Defaults to you.",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def unlock_tier(
+        self,
+        interaction: discord.Interaction,
+        tier: int,
+        user: discord.User | None = None,
+    ) -> None:
+        target = user or interaction.user
+        if tier < 1 or tier > 4:
+            await interaction.response.send_message(
+                "Tier must be between 1 and 4.", ephemeral=True
+            )
+            return
+        await self.db.get_or_create_player(target.id)
+        await self.db.conn.execute(
+            "UPDATE players SET unlocked_tier = ? WHERE discord_user_id = ?",
+            (tier, target.id),
+        )
+        await self.db.conn.commit()
+        await interaction.response.send_message(
+            f"{target.mention} can now train up to tier T{tier}.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="set-queue-cap",
+        description="Set a player's summoning queue cap (owner only).",
+    )
+    @app_commands.describe(
+        cap="New batch-size cap (>= 1).",
+        user="Target player. Defaults to you.",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def set_queue_cap(
+        self,
+        interaction: discord.Interaction,
+        cap: int,
+        user: discord.User | None = None,
+    ) -> None:
+        target = user or interaction.user
+        if cap < 1:
+            await interaction.response.send_message("Cap must be >= 1.", ephemeral=True)
+            return
+        await self.db.get_or_create_player(target.id)
+        await self.db.conn.execute(
+            "UPDATE players SET training_queue_cap = ? WHERE discord_user_id = ?",
+            (cap, target.id),
+        )
+        await self.db.conn.commit()
+        await interaction.response.send_message(
+            f"{target.mention} queue cap set to {cap:,}.", ephemeral=True
+        )
+
+    @app_commands.command(
+        name="set-train-speed",
+        description="Set a player's training speed boost percent (owner only).",
+    )
+    @app_commands.describe(
+        percent="Speed boost percent (0-99). Reduces training time.",
+        user="Target player. Defaults to you.",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def set_train_speed(
+        self,
+        interaction: discord.Interaction,
+        percent: int,
+        user: discord.User | None = None,
+    ) -> None:
+        target = user or interaction.user
+        if percent < 0 or percent > 99:
+            await interaction.response.send_message(
+                "Percent must be between 0 and 99.", ephemeral=True
+            )
+            return
+        await self.db.get_or_create_player(target.id)
+        await self.db.conn.execute(
+            "UPDATE players SET training_speed_boost_pct = ? WHERE discord_user_id = ?",
+            (percent, target.id),
+        )
+        await self.db.conn.commit()
+        await interaction.response.send_message(
+            f"{target.mention} training speed boost set to {percent}%.",
+            ephemeral=True,
+        )
+
     async def cog_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:

@@ -8,7 +8,7 @@ collect heroes, research upgrades, gather resources and fight raids.
 > It defines scope, design constraints, what to ask the user before writing code,
 > and the relationship to the sibling project `wahelper` (hourly-quest helper).
 
-Status: **gathering live (2 starting march slots, 30 min cooldown, fixed-base + crit yield); gacha / research / combat still TBD.**
+Status: **Summoning Gate live — T1 troops trainable, one queue at a time, food-only cost. Higher tiers + queue scaling come with the research PR. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan.**
 
 ## Stack
 
@@ -40,14 +40,23 @@ Logs land in `data/wagame.log` (rotating) and stdout.
 - `/hero codename:<slug>` — full info on a hero from the catalog (ephemeral).
 - `/gather` — ephemeral panel with five buttons (Gold / Food / Wood / Claim
   Ready / Refresh). Each march takes 30 min and produces a fixed-base yield
-  plus a small chance of a ×2 crit. Capacity starts at 2 marches and tops out
+  plus a small chance of a x2 crit. Capacity starts at 2 marches and tops out
   at 6 (research will unlock the extra slots).
+- `/summon` — Summoning Gate panel. Pick a troop from the dropdown, then
+  Train 1 / 10 / 50 / Max. One batch at a time; troops auto-arrive in your
+  city when the timer ends. Cost is food only. Tiers beyond T1 are gated
+  behind research.
+- `/army` — list the troops in your city, grouped by tier (ephemeral).
 - `/admin grant user:<@user> gold:<n> food:<n> wood:<n>` — owner only.
 - `/admin reset user:<@user>` — owner only; wipes the row.
 - `/admin grant-hero codename:<slug> user:<@user> level:<n>` — owner only;
   grants a hero from the catalog. Repeated grants of the same hero increment
   `dupes_pending` instead of stacking, so the gacha PR can decide what to do
   with duplicates (shards / star-up / dust).
+- `/admin unlock-tier tier:<1-4> user:<@user>` — owner only; raise a
+  player's max trainable troop tier (research PR will replace this).
+- `/admin set-queue-cap cap:<n> user:<@user>` — owner only.
+- `/admin set-train-speed percent:<0-99> user:<@user>` — owner only.
 
 ## Heroes catalog
 
@@ -73,11 +82,13 @@ bot.py                      entrypoint
 wagame/
   config.py                 .env loader
   db.py                     async SQLite + migration runner
-  heroes_data.py            seed loader + sync_heroes()
+  heroes_data.py            heroes seed loader + sync_heroes()
+  troops_data.py            troops seed loader + sync_troops()
   cogs/                     discord.py cogs (one per system, eventually)
   game/                     pure logic — testable without Discord
   data/                     static seeds (heroes.json, …)
   tools/                    scripts (e.g. scrape_kohqs)
 migrations/                 NNN_name.sql, applied in order
+docs/                       roadmap, design notes
 tests/                      pytest
 ```
