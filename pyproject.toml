@@ -2,7 +2,7 @@
 name = "wagame"
 version = "0.0.1"
 description = "Discord-native idle/RPG bot inspired by Witch Arcana."
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "discord.py>=2.4,<3",
     "aiosqlite>=0.20",
@@ -26,7 +26,7 @@ exclude = ["tests*", "data*", "migrations*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]

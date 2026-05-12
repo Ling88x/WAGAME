@@ -12,7 +12,7 @@ Status: **heroes catalog seeded — `/profile`, `/heroes`, `/hero`, `/admin gran
 
 ## Stack
 
-- Python 3.11+, [`discord.py`](https://github.com/Rapptz/discord.py) 2.4+
+- Python 3.10+, [`discord.py`](https://github.com/Rapptz/discord.py) 2.4+
 - SQLite via `aiosqlite`, single file at `data/wagame.db`
 - Hand-rolled migration runner — `migrations/NNN_name.sql`, applied on startup, version tracked in `schema_version`
 - `python-dotenv` for config; `ruff` + `pytest` for dev
