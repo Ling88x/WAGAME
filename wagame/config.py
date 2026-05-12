@@ -18,6 +18,7 @@ class Config:
     discord_token: str
     db_path: Path
     log_level: str
+    dev_guild_id: int | None
 
     @classmethod
     def from_env(cls) -> Config:
@@ -34,4 +35,12 @@ class Config:
 
         log_level = os.getenv("WAGAME_LOG_LEVEL", "INFO").strip().upper()
 
-        return cls(discord_token=token, db_path=db_path, log_level=log_level)
+        guild_raw = os.getenv("WAGAME_GUILD_ID", "").strip()
+        dev_guild_id = int(guild_raw) if guild_raw else None
+
+        return cls(
+            discord_token=token,
+            db_path=db_path,
+            log_level=log_level,
+            dev_guild_id=dev_guild_id,
+        )

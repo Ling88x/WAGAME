@@ -55,8 +55,20 @@ class WaBot(commands.Bot):
         await sync_heroes(self.db)
         for ext in INITIAL_COGS:
             await self.load_extension(ext)
-        await self.tree.sync()
-        logging.getLogger(__name__).info("Slash commands synced.")
+
+        log = logging.getLogger(__name__)
+        if self.config.dev_guild_id is not None:
+            # Guild-scoped sync propagates instantly — use during development.
+            # Mirrors the global command set into the guild for fast iteration.
+            guild = discord.Object(id=self.config.dev_guild_id)
+            self.tree.copy_global_to(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            log.info("Synced %d slash command(s) to guild %d.",
+                     len(synced), self.config.dev_guild_id)
+        else:
+            synced = await self.tree.sync()
+            log.info("Synced %d slash command(s) globally (may take up to 1h to propagate).",
+                     len(synced))
 
     async def close(self) -> None:
         await self.db.close()
