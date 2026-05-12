@@ -59,12 +59,18 @@ class WaBot(commands.Bot):
         log = logging.getLogger(__name__)
         if self.config.dev_guild_id is not None:
             # Guild-scoped sync propagates instantly — use during development.
-            # Mirrors the global command set into the guild for fast iteration.
+            # Order matters: copy globals into the guild tree and sync there
+            # FIRST, then wipe globals from Discord so commands don't appear
+            # twice (once globally, once per guild).
             guild = discord.Object(id=self.config.dev_guild_id)
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             log.info("Synced %d slash command(s) to guild %d.",
                      len(synced), self.config.dev_guild_id)
+
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
+            log.info("Cleared global slash commands (dev guild mode).")
         else:
             synced = await self.tree.sync()
             log.info("Synced %d slash command(s) globally (may take up to 1h to propagate).",
