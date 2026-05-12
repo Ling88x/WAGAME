@@ -62,7 +62,7 @@ class Database:
 
     async def get_or_create_player(self, discord_user_id: int) -> aiosqlite.Row:
         await self.conn.execute(
-            "INSERT OR IGNORE INTO players (discord_user_id) VALUES (?)",
+            "INSERT OR IGNORE INTO players (discord_user_id, march_capacity) VALUES (?, 2)",
             (discord_user_id,),
         )
         await self.conn.execute(

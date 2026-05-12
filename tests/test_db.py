@@ -42,7 +42,7 @@ async def test_get_or_create_player_creates_row(db: Database) -> None:
     assert player["discord_user_id"] == 123456
     assert player["gold"] == 0
     assert player["player_level"] == 1
-    assert player["march_capacity"] == 1
+    assert player["march_capacity"] == 2
 
 
 async def test_get_or_create_player_is_idempotent(db: Database) -> None:

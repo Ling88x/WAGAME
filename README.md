@@ -8,7 +8,7 @@ collect heroes, research upgrades, gather resources and fight raids.
 > It defines scope, design constraints, what to ask the user before writing code,
 > and the relationship to the sibling project `wahelper` (hourly-quest helper).
 
-Status: **heroes catalog seeded — `/profile`, `/heroes`, `/hero`, `/admin grant{,-hero,-reset}` work; gathering / gacha / combat still TBD.**
+Status: **gathering live (2 starting march slots, 30 min cooldown, fixed-base + crit yield); gacha / research / combat still TBD.**
 
 ## Stack
 
@@ -38,6 +38,10 @@ Logs land in `data/wagame.log` (rotating) and stdout.
 - `/profile` — your level, march capacity, and resources (ephemeral).
 - `/heroes` — list the heroes you own (ephemeral).
 - `/hero codename:<slug>` — full info on a hero from the catalog (ephemeral).
+- `/gather` — ephemeral panel with five buttons (Gold / Food / Wood / Claim
+  Ready / Refresh). Each march takes 30 min and produces a fixed-base yield
+  plus a small chance of a ×2 crit. Capacity starts at 2 marches and tops out
+  at 6 (research will unlock the extra slots).
 - `/admin grant user:<@user> gold:<n> food:<n> wood:<n>` — owner only.
 - `/admin reset user:<@user>` — owner only; wipes the row.
 - `/admin grant-hero codename:<slug> user:<@user> level:<n>` — owner only;

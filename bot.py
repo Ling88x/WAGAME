@@ -17,6 +17,7 @@ INITIAL_COGS = (
     "wagame.cogs.profile",
     "wagame.cogs.admin",
     "wagame.cogs.heroes",
+    "wagame.cogs.gather",
 )
 
 
