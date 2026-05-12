@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 HEROES_JSON_PATH = Path(__file__).resolve().parent / "data" / "heroes.json"
 
-KNOWN_RARITIES = ("common", "rare", "epic", "legendary", "mythic")
+KNOWN_RARITIES = ("common", "uncommon", "rare", "epic", "legendary", "mythic")
 
 
 @dataclass(frozen=True)
