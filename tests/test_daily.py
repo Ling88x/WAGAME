@@ -32,13 +32,13 @@ async def db(tmp_path: Path) -> Database:
 def test_reset_day_before_boundary_returns_previous_calendar_day() -> None:
     # 20:00 UTC on 2026-05-13 is still in the reset day that began at
     # 21:00 UTC on 2026-05-12.
-    moment = datetime.datetime(2026, 5, 13, 20, 0, tzinfo=datetime.UTC)
+    moment = datetime.datetime(2026, 5, 13, 20, 0, tzinfo=datetime.timezone.utc)
     assert current_reset_day(moment) == datetime.date(2026, 5, 12)
 
 
 def test_reset_day_at_boundary_returns_same_calendar_day() -> None:
     # 21:00 UTC is the exact start of a new reset day.
-    moment = datetime.datetime(2026, 5, 13, RESET_HOUR_UTC, 0, tzinfo=datetime.UTC)
+    moment = datetime.datetime(2026, 5, 13, RESET_HOUR_UTC, 0, tzinfo=datetime.timezone.utc)
     assert current_reset_day(moment) == datetime.date(2026, 5, 13)
 
 

@@ -21,9 +21,9 @@ RESET_HOUR_UTC = 21
 def current_reset_day(now: datetime.datetime | None = None) -> datetime.date:
     """Return the date string label of the current WA reset day (UTC)."""
     if now is None:
-        now = datetime.datetime.now(datetime.UTC)
+        now = datetime.datetime.now(datetime.timezone.utc)
     elif now.tzinfo is None:
-        now = now.replace(tzinfo=datetime.UTC)
+        now = now.replace(tzinfo=datetime.timezone.utc)
     shifted = now - datetime.timedelta(hours=RESET_HOUR_UTC)
     return shifted.date()
 
