@@ -10,6 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from wagame.cogs.heroes import _autocomplete_hero
 from wagame.db import Database
 
 
@@ -75,10 +76,10 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
 
     @app_commands.command(
         name="grant-hero",
-        description="Grant a hero to a player by codename (owner only).",
+        description="Grant a hero to a player (owner only).",
     )
     @app_commands.describe(
-        codename="Hero codename (see data/heroes.json).",
+        hero="Search by name or codename — pick from suggestions.",
         user="Recipient. Defaults to you.",
         level="Starting level (default 1).",
     )
@@ -86,12 +87,12 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
     async def grant_hero(
         self,
         interaction: discord.Interaction,
-        codename: str,
+        hero: str,
         user: discord.User | None = None,
         level: int = 1,
     ) -> None:
         target = user or interaction.user
-        codename = codename.strip().lower()
+        codename = hero.strip().lower()
         if level < 1:
             await interaction.response.send_message("Level must be >= 1.", ephemeral=True)
             return
@@ -99,10 +100,17 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
         async with self.db.conn.execute(
             "SELECT id, name FROM heroes WHERE codename = ?", (codename,)
         ) as cur:
-            hero = await cur.fetchone()
-        if hero is None:
+            hero_row = await cur.fetchone()
+        # Owner may have typed the display name directly instead of clicking a
+        # suggestion — fall back to a name-exact lookup.
+        if hero_row is None:
+            async with self.db.conn.execute(
+                "SELECT id, name FROM heroes WHERE LOWER(name) = ?", (codename,)
+            ) as cur:
+                hero_row = await cur.fetchone()
+        if hero_row is None:
             await interaction.response.send_message(
-                f"No hero with codename `{codename}`.", ephemeral=True
+                f"No hero matches `{hero}`.", ephemeral=True
             )
             return
 
@@ -114,13 +122,19 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
             ON CONFLICT(discord_user_id, hero_id) DO UPDATE SET
                 dupes_pending = dupes_pending + 1
             """,
-            (target.id, hero["id"], level),
+            (target.id, hero_row["id"], level),
         )
         await self.db.conn.commit()
         await interaction.response.send_message(
-            f"Granted **{hero['name']}** (Lv {level}) to {target.mention}.",
+            f"Granted **{hero_row['name']}** (Lv {level}) to {target.mention}.",
             ephemeral=True,
         )
+
+    @grant_hero.autocomplete("hero")
+    async def grant_hero_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        return await _autocomplete_hero(self.db, current)
 
     @app_commands.command(
         name="unlock-tier",

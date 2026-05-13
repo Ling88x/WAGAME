@@ -30,6 +30,7 @@ class HeroSpec:
     house: str | None
     terrain: str | None
     release_date: str | None
+    image_url: str | None
     bonuses: tuple[str, ...]
     tags: tuple[str, ...]
 
@@ -60,6 +61,7 @@ def load_specs(path: Path = HEROES_JSON_PATH) -> list[HeroSpec]:
                 house=_opt_str(entry.get("house")),
                 terrain=_opt_str(entry.get("terrain")),
                 release_date=_opt_str(entry.get("release_date")),
+                image_url=_opt_str(entry.get("image_url")),
                 bonuses=tuple(str(b) for b in entry.get("bonuses", [])),
                 tags=tuple(str(t) for t in entry.get("tags", [])),
             )
@@ -84,8 +86,8 @@ async def sync_heroes(db: Database, specs: list[HeroSpec] | None = None) -> int:
         await db.conn.execute(
             """
             INSERT INTO heroes (codename, name, rarity, element, house, terrain,
-                                release_date, bonuses_json, tags_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                release_date, image_url, bonuses_json, tags_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(codename) DO UPDATE SET
                 name         = excluded.name,
                 rarity       = excluded.rarity,
@@ -93,6 +95,7 @@ async def sync_heroes(db: Database, specs: list[HeroSpec] | None = None) -> int:
                 house        = excluded.house,
                 terrain      = excluded.terrain,
                 release_date = excluded.release_date,
+                image_url    = excluded.image_url,
                 bonuses_json = excluded.bonuses_json,
                 tags_json    = excluded.tags_json
             """,
@@ -104,6 +107,7 @@ async def sync_heroes(db: Database, specs: list[HeroSpec] | None = None) -> int:
                 spec.house,
                 spec.terrain,
                 spec.release_date,
+                spec.image_url,
                 json.dumps(list(spec.bonuses)),
                 json.dumps(list(spec.tags)),
             ),

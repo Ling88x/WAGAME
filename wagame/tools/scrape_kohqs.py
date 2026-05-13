@@ -123,7 +123,7 @@ def _extract_bonuses(block: str) -> list[str]:
 _KNOWN_RARITIES = {"common", "rare", "epic", "legendary", "mythic"}
 
 
-def _parse_hero_block(block: str) -> dict[str, Any] | None:
+def _parse_hero_block(block: str, portrait_base: str | None = None) -> dict[str, Any] | None:
     codename_m = _CODENAME_RE.search(block)
     name_m = _NAME_RE.search(block)
     if not codename_m or not name_m:
@@ -149,6 +149,9 @@ def _parse_hero_block(block: str) -> dict[str, Any] | None:
             break
 
     bonuses = _extract_bonuses(block)
+    image_url = (
+        f"{portrait_base.rstrip('/')}/{codename}.png" if portrait_base else None
+    )
 
     return {
         "codename": codename,
@@ -158,16 +161,17 @@ def _parse_hero_block(block: str) -> dict[str, Any] | None:
         "house": None,
         "terrain": biome,
         "release_date": release,
+        "image_url": image_url,
         "bonuses": bonuses,
         "tags": [htype] if htype else [],
     }
 
 
-def extract_heroes(html: str) -> list[dict[str, Any]]:
+def extract_heroes(html: str, portrait_base: str | None = None) -> list[dict[str, Any]]:
     heroes: list[dict[str, Any]] = []
     seen: set[str] = set()
     for block in _split_hero_blocks(html):
-        hero = _parse_hero_block(block)
+        hero = _parse_hero_block(block, portrait_base=portrait_base)
         if hero is None:
             continue
         if hero["codename"] in seen:
@@ -186,6 +190,15 @@ def main() -> None:
     parser.add_argument("--out", default=str(OUTPUT), help="Output JSON path.")
     parser.add_argument("--dry", action="store_true", help="Print to stdout, don't write.")
     parser.add_argument("--raw", action="store_true", help="Dump raw HTML and exit.")
+    parser.add_argument(
+        "--portrait-base",
+        default=None,
+        help=(
+            "Optional base URL for hero portraits. If set, image_url is filled "
+            "as `<base>/<codename>.png` for every hero. Leave unset to keep "
+            "image_url null (the bot falls back to no thumbnail)."
+        ),
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -196,7 +209,7 @@ def main() -> None:
         sys.stdout.write(html)
         return
 
-    heroes = extract_heroes(html)
+    heroes = extract_heroes(html, portrait_base=args.portrait_base)
     log.info("Extracted %d hero card(s) from %s", len(heroes), args.url)
 
     if not heroes:
