@@ -28,7 +28,7 @@ These were pinned by the user; treat as contract.
 
 - **Per-user-global model.** Data keyed by `discord_user_id`, not per-guild.
 - **Single-message panels, edit in place.** Personal panels (`/profile`,
-  `/gather`, `/summon`, `/army`) are ephemeral so only the invoker sees them.
+  `/gather`, `/train`, `/army`, `/summon`) are ephemeral so only the invoker sees them.
   Buttons over reactions, no channel spam.
 - **Polish chat / English code.** Commits, code, comments, docs in English.
 - **Ask before risky / shared-state actions.** Don't force-push, don't drop
@@ -124,7 +124,7 @@ When the relevant PR comes up, raise the item and ask whether to fold it in.
   log vs result screen. Reads `troop_attack_pct` / `troop_hp_pct` already
   populated by research.
 - **Wood needs a sink.** Research is gold-only by user's call. Food is
-  consumed by Summoning Gate, gold by research. Wood is still produced by
+  consumed by Training Grounds, gold by research. Wood is still produced by
   gather but consumed by nothing — likely role for future buildings system
   or a second research currency tier. Revisit when buildings come up.
 
@@ -137,14 +137,13 @@ When the relevant PR comes up, raise the item and ask whether to fold it in.
 - **Marches starting slow, sped up later.** User's call: early game marches
   feel sluggish; research + heroes shave time. Bake this into the gather
   refactor.
-- **Buildings system.** Summoning Gate, Great Hall, helper buildings — each
+- **Buildings system.** Training Grounds, Great Hall, helper buildings — each
   with levels and upgrade costs. **Explicitly deferred** by user to avoid
   game getting too heavy. Until then, queue cap / speed boost / march cap
   live as per-player columns scaled by research.
-- **Hero summoning surface.** Distinct from troop summoning. In-game
-  equivalent is "Summoning Tower" (separate from "Summoning Gate"). Bot
-  currently only grants heroes via `/admin grant-hero` — needs a player
-  pull mechanism with pity + currency.
+- **Hero level-up.** Once unlocked, shards keep accumulating in
+  `hero_shards.count`. Need a cost curve + stat scaling to consume them
+  beyond the 100-shard unlock floor. Currently they just sit there.
 - **Heroes element / house fields.** Currently `NULL` in the catalog
   (the list page doesn't carry them). Either scrape the per-hero detail
   pages on kohqs.com or fill manually — needed before element-based

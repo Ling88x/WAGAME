@@ -34,8 +34,9 @@ are intentionally underspecified — you must clarify before implementing.
 
 1. **Combat** — modelled loosely on in-game WA combat. The user will explain
    the in-game rules when you start working on this. **Ask first.**
-2. **Hero collection (gacha-flavoured)** — players acquire heroes over time.
-   Rarity tiers, summon currency, pity, etc. — to be defined.
+2. **Hero collection — random shard rolls.** Players spend gems to summon
+   unlock shards for specific heroes; 100 shards unlocks a hero, pity caps
+   bad luck. Rarity tiers gate summon costs.
 3. **Research** — XP / resource sink that boosts damage and unlocks things.
    Probably a tech tree. Shape and pacing — to be defined.
 4. **Solo raids** — PvE bosses. Eventually PvP raids between players;
@@ -74,7 +75,7 @@ assume:
   trade/PvP only makes sense in a global model.
 - Logging / observability needs?
 
-**Heroes & gacha:**
+**Heroes & summoning:**
 - Source for hero list: scrape https://kohqs.com/wa/heroes, WebFetch the
   official wiki, or user-provided seed file? (kohqs has the cleanest
   structured data — name, rarity, element, terrain, bonuses.)
@@ -162,7 +163,7 @@ opinions; assume these unless told otherwise.
 Treat as a default to be approved or replaced — the user may want some-
 thing else.
 
-- `discord.py` 2.x; one cog per system (`gather`, `gacha`, `combat`,
+- `discord.py` 2.x; one cog per system (`gather`, `summon`, `combat`,
   `research`, `raid`, `profile`, `daily`, `admin`).
 - `aiosqlite` for persistence. Single DB file per bot instance. Schema
   versioned via a `migrations/` directory; migrations applied on startup.
@@ -193,14 +194,14 @@ thing else.
 - WA wiki: https://athinkingape.helpshift.com/hc/en/7-witch-arcana---magic-school/
 - Hero database: https://kohqs.com/wa/heroes — full roster with rarity,
   element, terrain affinity and bonus lists. Use as the canonical source
-  when seeding the gacha pool.
+  when seeding the summon pool.
 - The user is `Ling88x` on GitHub.
 
 ## Open with the user every new session
 
 > "Hi — I've read CLAUDE.md. Which system are we touching today: gathering,
-> gacha, combat, research, raids, or progression? And before I start, can
-> you walk me through the rules / what 'good' looks like for that slice?"
+> summoning, combat, research, raids, or progression? And before I start,
+> can you walk me through the rules / what 'good' looks like for that slice?"
 
 Then ask the relevant block of questions from the section above, agree on
 scope, and only then code.

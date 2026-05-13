@@ -4,8 +4,8 @@
 -- Use `codename` (game internal slug, e.g. "ghostpink") as the stable key.
 --
 -- `owned_heroes` is the per-player join table. UNIQUE on (player, hero):
--- duplicates from gacha increment `dupes_pending` (we'll define what to do
--- with them when the gacha PR lands — shards / star-up / dust).
+-- duplicates from /summon increment `dupes_pending` (we'll define what to
+-- do with them when the level-up system lands — shards / star-up / dust).
 
 CREATE TABLE IF NOT EXISTS heroes (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

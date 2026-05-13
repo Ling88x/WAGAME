@@ -1,6 +1,6 @@
 """/heroes and /hero — owned-roster grid and catalog lookup.
 
-Until gacha lands, owned heroes only appear here when an owner uses
+Players acquire heroes by spending gems in `/summon`, or via
 `/admin grant-hero`. Display is ephemeral. The owned-roster view stacks
 up to 9 mini-embeds (one per hero, rarity-colored, with optional
 portrait thumbnail) plus a header embed; pagination buttons handle the
@@ -238,8 +238,8 @@ class HeroesCog(commands.Cog):
         if not rows:
             await interaction.response.send_message(
                 embed=toast(
-                    "You don't own any heroes yet. Once gacha is live, summon one — "
-                    "for now an admin can grant you one with `/admin grant-hero`.",
+                    "You don't own any heroes yet. Try `/summon hero:<name>` to "
+                    "spend gems on a hero, or ask an admin for `/admin grant-hero`.",
                     Outcome.INFO,
                 ),
                 ephemeral=True,

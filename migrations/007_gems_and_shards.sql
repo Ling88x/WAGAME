@@ -12,9 +12,10 @@
 -- `hero_shards` is the per-player unlock progress per hero. `count`
 -- accumulates without cap — once it hits 100 the hero auto-unlocks
 -- (insert into owned_heroes) but shards keep growing for future level
--- upgrades. `pity_pulls` is the rolling number of pulls on this hero
+-- upgrades. `pity_pulls` is the rolling summon count on this hero
 -- since the last unlock; resets to 0 on unlock; hard pity top-up
--- triggers at PITY_PULL_LIMIT (see wagame/game/gacha.py).
+-- triggers at PITY_LIMIT (see wagame/game/summon.py). The column name
+-- is historical — the user-facing concept is "pity".
 
 ALTER TABLE players ADD COLUMN gems INTEGER NOT NULL DEFAULT 5000;
 ALTER TABLE players ADD COLUMN last_daily_claim_date TEXT;

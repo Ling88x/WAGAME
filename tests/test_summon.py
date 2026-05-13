@@ -1,22 +1,32 @@
-"""Tests for the Summoning Gate — pure logic + DB-backed train/claim flow."""
+"""Tests for hero summoning logic + the /summon execute path.
+
+Split into:
+- pure logic: roll_shards, roll_summon, pity behaviour, expected mean
+- DB-backed: execute_summon credits/debits, owned_heroes inserts on unlock
+"""
 
 from __future__ import annotations
 
+import random
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
-from wagame.cogs.summon import claim_finished_training, start_training
+from wagame.cogs.summon import _fetch_shards, execute_summon
 from wagame.db import Database
 from wagame.game.summon import (
-    food_cost,
-    format_duration,
-    max_affordable_count,
-    plan_training,
-    total_train_seconds,
+    DAILY_GEM_BONUS,
+    PITY_LIMIT,
+    SHARDS_PER_UNLOCK,
+    STARTING_GEMS,
+    SUMMON_COST,
+    expected_shards_per_summon,
+    roll_shards,
+    roll_summon,
+    summon_cost,
 )
-from wagame.troops_data import TROOPS, sync_troops
-from wagame.ui import Outcome
+from wagame.heroes_data import HeroSpec, sync_heroes
 
 
 @pytest.fixture
@@ -24,258 +34,223 @@ async def db(tmp_path: Path) -> Database:
     database = Database(tmp_path / "summon.db")
     await database.connect()
     await database.migrate()
-    await sync_troops(database)
     yield database
     await database.close()
 
 
-# -- pure logic -------------------------------------------------------------
+# -- cost table ------------------------------------------------------------
 
 
-def test_food_cost_linear() -> None:
-    assert food_cost(15, 10) == 150
-    assert food_cost(0, 1000) == 0
-    assert food_cost(50, 0) == 0
+def test_summon_cost_matches_user_tier_pinning() -> None:
+    # Gold / purple / blue costs are the design pillars; lock them in.
+    assert SUMMON_COST["legendary"] == 2000
+    assert SUMMON_COST["epic"] == 900
+    assert SUMMON_COST["rare"] == 800
 
 
-def test_total_train_seconds_applies_boost() -> None:
-    assert total_train_seconds(30, 10, 0) == 300
-    # 10% boost on 300s → 270s
-    assert total_train_seconds(30, 10, 10) == 270
-    # 99% cap: never goes below 1s for non-zero base
-    assert total_train_seconds(30, 10, 999) == 3
+def test_summon_cost_unknown_rarity_falls_back_to_rare() -> None:
+    assert summon_cost("eldritch") == SUMMON_COST["rare"]
 
 
-def test_total_train_seconds_zero_count() -> None:
-    assert total_train_seconds(30, 0, 50) == 0
+# -- shard distribution ---------------------------------------------------
 
 
-def test_plan_training_packages_everything() -> None:
-    plan = plan_training(
-        troop_codename="catsith",
-        count=10,
-        food_per_unit=15,
-        train_seconds_per_unit=30,
-        speed_boost_pct=0,
-    )
-    assert plan.troop_codename == "catsith"
-    assert plan.count == 10
-    assert plan.food_cost == 150
-    assert plan.total_seconds == 300
+def test_expected_shards_per_summon_in_target_range() -> None:
+    # Between steep (~18) and middle (~27), we tuned to ~20.
+    mean = expected_shards_per_summon()
+    assert 18.0 <= mean <= 22.0
 
 
-def test_plan_training_rejects_nonpositive_count() -> None:
+def test_roll_shards_floor_is_one() -> None:
+    rng = random.Random(0)
+    for _ in range(500):
+        count, _ = roll_shards(rng)
+        assert count >= 1
+
+
+def test_roll_shards_jackpot_is_rare(rng_iterations: int = 5000) -> None:
+    rng = random.Random(42)
+    jackpots = 0
+    for _ in range(rng_iterations):
+        _, jackpot = roll_shards(rng)
+        if jackpot:
+            jackpots += 1
+    rate = jackpots / rng_iterations
+    # Band weight is 1%; allow ±0.6pp slack for 5k samples.
+    assert 0.004 <= rate <= 0.016
+
+
+def test_distribution_band_share_is_within_tolerance() -> None:
+    """Sanity-check that the bands fire roughly at their declared weights."""
+    rng = random.Random(123)
+    bucket = Counter()
+    for _ in range(10_000):
+        count, _ = roll_shards(rng)
+        if count <= 9:
+            bucket["a"] += 1
+        elif count <= 29:
+            bucket["b"] += 1
+        elif count <= 79:
+            bucket["c"] += 1
+        elif count <= 99:
+            bucket["d"] += 1
+        else:
+            bucket["e"] += 1
+    assert 0.50 <= bucket["a"] / 10_000 <= 0.60
+    assert 0.23 <= bucket["b"] / 10_000 <= 0.33
+    assert 0.10 <= bucket["c"] / 10_000 <= 0.16
+
+
+# -- pity ------------------------------------------------------------------
+
+
+def test_pity_caps_count_at_limit() -> None:
+    """No combination of unlucky rolls can exceed PITY_LIMIT without unlock."""
+    rng = random.Random(2026)
+    # Player who's been spectacularly unlucky: 99 summons, only 1 shard.
+    result = roll_summon(current_shards=1, pity=PITY_LIMIT - 1, rng=rng)
+    assert result.unlocked_now
+    assert result.pity_activated
+    assert result.new_total >= SHARDS_PER_UNLOCK
+    assert result.new_pity == 0
+
+
+def test_pity_does_not_clobber_a_naturally_big_roll() -> None:
+    """When the natural roll already unlocks, pity stays out of the way."""
+    # Force the natural roll to land in the jackpot band: we just rerun until
+    # we see a jackpot, then check the pity flag is False.
+    for seed in range(1000):
+        r = random.Random(seed)
+        result = roll_summon(current_shards=0, pity=PITY_LIMIT - 1, rng=r)
+        if result.jackpot:
+            assert result.unlocked_now
+            assert not result.pity_activated
+            return
+    pytest.fail("no jackpot in 1000 seeds — RNG seam broken")
+
+
+def test_pity_counter_resets_on_unlock() -> None:
+    rng = random.Random(7)
+    # Pre-stack to 99 shards so any summon >= 1 unlocks.
+    result = roll_summon(current_shards=99, pity=50, rng=rng)
+    assert result.unlocked_now
+    assert result.new_pity == 0
+
+
+def test_pity_counter_increments_when_no_unlock() -> None:
+    rng = random.Random(99)
+    result = roll_summon(current_shards=0, pity=10, rng=rng)
+    if not result.unlocked_now:
+        assert result.new_pity == 11
+
+
+def test_negative_inputs_rejected() -> None:
     with pytest.raises(ValueError):
-        plan_training(
-            troop_codename="catsith",
-            count=0,
-            food_per_unit=15,
-            train_seconds_per_unit=30,
-            speed_boost_pct=0,
-        )
+        roll_summon(current_shards=-1, pity=0)
+    with pytest.raises(ValueError):
+        roll_summon(current_shards=0, pity=-1)
 
 
-def test_max_affordable_count_limited_by_food_or_cap() -> None:
-    assert max_affordable_count(food_available=300, food_per_unit=15, queue_cap=50) == 20
-    assert max_affordable_count(food_available=10_000, food_per_unit=15, queue_cap=50) == 50
-    assert max_affordable_count(food_available=0, food_per_unit=15, queue_cap=50) == 0
-    # Free troops still capped at queue.
-    assert max_affordable_count(food_available=100, food_per_unit=0, queue_cap=50) == 50
+# -- DB-backed execute_summon ------------------------------------------------
 
 
-def test_format_duration_units() -> None:
-    assert format_duration(0) == ""
-    assert format_duration(45) == "45s"
-    assert format_duration(125) == "2m 05s"
-    assert format_duration(3725) == "1h 02m"
-    assert format_duration(90061) == "1d 01h"
-
-
-# -- catalog ----------------------------------------------------------------
-
-
-def test_troop_catalog_has_eight_units_across_four_tiers() -> None:
-    assert len(TROOPS) == 8
-    tiers = sorted({t.tier for t in TROOPS})
-    assert tiers == [1, 2, 3, 4]
-    # T3 and T4 must have three role variants each.
-    for tier in (3, 4):
-        roles = {t.role for t in TROOPS if t.tier == tier}
-        assert roles == {"monster", "defender", "player"}
-
-
-async def test_sync_troops_is_idempotent(db: Database) -> None:
-    await sync_troops(db)  # second time
-    async with db.conn.execute("SELECT COUNT(*) FROM troops") as cur:
+async def _seed_hero(db: Database, *, rarity: str = "rare") -> int:
+    spec = HeroSpec(
+        codename="testhero",
+        name="Test Hero",
+        rarity=rarity,
+        element=None,
+        house=None,
+        terrain=None,
+        release_date=None,
+        image_url=None,
+        bonuses=(),
+        tags=(),
+    )
+    await sync_heroes(db, [spec])
+    async with db.conn.execute("SELECT id FROM heroes WHERE codename = 'testhero'") as cur:
         row = await cur.fetchone()
     assert row is not None
-    assert row[0] == 8
+    return int(row["id"])
 
 
-# -- start_training --------------------------------------------------------
+async def test_new_player_starts_with_seeded_gems(db: Database) -> None:
+    # get_or_create_player also runs the daily auto-claim on the very first
+    # call, so a fresh account ends up at STARTING_GEMS plus today's bonus.
+    # See tests/test_daily.py for the standalone proof of that flow.
+    player = await db.get_or_create_player(1)
+    assert player["gems"] == STARTING_GEMS + DAILY_GEM_BONUS
 
 
-async def test_start_training_succeeds_for_t1_with_food(db: Database) -> None:
-    user_id = 1
-    await db.get_or_create_player(user_id)
-    await db.conn.execute(
-        "UPDATE players SET food = 10000 WHERE discord_user_id = ?", (user_id,)
-    )
-    await db.conn.commit()
+async def test_execute_summon_debits_gems_and_credits_shards(db: Database) -> None:
+    hero_id = await _seed_hero(db, rarity="rare")
+    await db.get_or_create_player(1)
 
-    result = await start_training(db, user_id, "catsith", 10)
-    assert result.outcome == Outcome.SUCCESS, result.message
+    async with db.conn.execute("SELECT * FROM heroes WHERE id = ?", (hero_id,)) as cur:
+        hero_row = await cur.fetchone()
+    assert hero_row is not None
 
     async with db.conn.execute(
-        "SELECT food FROM players WHERE discord_user_id = ?", (user_id,)
+        "SELECT gems FROM players WHERE discord_user_id = 1"
     ) as cur:
         row = await cur.fetchone()
     assert row is not None
-    assert row["food"] == 10000 - 15 * 10
+    starting_balance = int(row["gems"])
 
+    result, _ = await execute_summon(db, 1, hero_row)
     async with db.conn.execute(
-        "SELECT troop_codename, count FROM training_jobs WHERE discord_user_id = ?",
-        (user_id,),
-    ) as cur:
-        job = await cur.fetchone()
-    assert job is not None
-    assert job["troop_codename"] == "catsith"
-    assert job["count"] == 10
-
-
-async def test_start_training_blocks_locked_tier(db: Database) -> None:
-    user_id = 2
-    await db.get_or_create_player(user_id)
-    await db.conn.execute(
-        "UPDATE players SET food = 1000000 WHERE discord_user_id = ?", (user_id,)
-    )
-    await db.conn.commit()
-
-    result = await start_training(db, user_id, "gryphon", 1)
-    assert result.outcome == Outcome.ERROR
-    assert "locked" in result.message.lower()
-
-
-async def test_start_training_blocks_when_food_short(db: Database) -> None:
-    user_id = 3
-    await db.get_or_create_player(user_id)
-    # Default food is 0, T1 costs 15/unit.
-    result = await start_training(db, user_id, "catsith", 5)
-    assert result.outcome == Outcome.ERROR
-    assert "food" in result.message.lower()
-
-
-async def test_start_training_blocks_above_queue_cap(db: Database) -> None:
-    user_id = 4
-    await db.get_or_create_player(user_id)
-    await db.conn.execute(
-        "UPDATE players SET food = 10000000 WHERE discord_user_id = ?", (user_id,)
-    )
-    await db.conn.commit()  # default queue cap = 50
-    result = await start_training(db, user_id, "catsith", 51)
-    assert result.outcome == Outcome.ERROR
-    assert "cap" in result.message.lower()
-
-
-async def test_start_training_rejects_second_concurrent_job(db: Database) -> None:
-    user_id = 5
-    await db.get_or_create_player(user_id)
-    await db.conn.execute(
-        "UPDATE players SET food = 10000 WHERE discord_user_id = ?", (user_id,)
-    )
-    await db.conn.commit()
-    first = await start_training(db, user_id, "catsith", 1)
-    assert first.outcome == Outcome.SUCCESS
-    result = await start_training(db, user_id, "catsith", 1)
-    assert result.outcome == Outcome.ERROR
-    assert "already" in result.message.lower()
-
-
-# -- claim_finished_training ------------------------------------------------
-
-
-async def test_claim_finished_moves_troops_and_clears_job(db: Database) -> None:
-    user_id = 6
-    await db.get_or_create_player(user_id)
-    await db.conn.execute(
-        """
-        INSERT INTO training_jobs (discord_user_id, troop_codename, count,
-                                   started_at, finishes_at)
-        VALUES (?, 'catsith', 25, 0, 1)
-        """,
-        (user_id,),
-    )
-    await db.conn.commit()
-
-    claimed = await claim_finished_training(db, user_id)
-    assert claimed == ("Catsith", 25)
-
-    async with db.conn.execute(
-        "SELECT count FROM owned_troops WHERE discord_user_id = ?", (user_id,)
+        "SELECT gems FROM players WHERE discord_user_id = 1"
     ) as cur:
         row = await cur.fetchone()
     assert row is not None
-    assert row["count"] == 25
+    assert int(row["gems"]) == starting_balance - SUMMON_COST["rare"]
 
-    async with db.conn.execute(
-        "SELECT COUNT(*) FROM training_jobs WHERE discord_user_id = ?", (user_id,)
-    ) as cur:
-        row = await cur.fetchone()
-    assert row is not None
-    assert row[0] == 0
+    count, _pity = await _fetch_shards(db, 1, hero_id)
+    assert count == result.shards_rolled
 
 
-async def test_claim_finished_stacks_on_existing_count(db: Database) -> None:
-    user_id = 7
-    await db.get_or_create_player(user_id)
+async def test_execute_summon_unlocks_hero_on_threshold(db: Database) -> None:
+    hero_id = await _seed_hero(db, rarity="rare")
+    await db.get_or_create_player(1)
+    # Pre-stack to 99 shards so any roll triggers an unlock.
     await db.conn.execute(
-        """
-        INSERT INTO owned_troops (discord_user_id, troop_codename, count)
-        VALUES (?, 'catsith', 10)
-        """,
-        (user_id,),
-    )
-    await db.conn.execute(
-        """
-        INSERT INTO training_jobs (discord_user_id, troop_codename, count,
-                                   started_at, finishes_at)
-        VALUES (?, 'catsith', 5, 0, 1)
-        """,
-        (user_id,),
+        "INSERT INTO hero_shards (discord_user_id, hero_id, count, pity_pulls) "
+        "VALUES (1, ?, 99, 50)",
+        (hero_id,),
     )
     await db.conn.commit()
 
-    await claim_finished_training(db, user_id)
+    async with db.conn.execute("SELECT * FROM heroes WHERE id = ?", (hero_id,)) as cur:
+        hero_row = await cur.fetchone()
+    assert hero_row is not None
+    result, flash = await execute_summon(db, 1, hero_row)
+    assert result.unlocked_now
+    # Pity counter cleared.
+    _, pity = await _fetch_shards(db, 1, hero_id)
+    assert pity == 0
+    # owned_heroes now carries the hero.
     async with db.conn.execute(
-        "SELECT count FROM owned_troops WHERE discord_user_id = ?", (user_id,)
+        "SELECT level FROM owned_heroes WHERE discord_user_id = 1 AND hero_id = ?",
+        (hero_id,),
     ) as cur:
         row = await cur.fetchone()
     assert row is not None
-    assert row["count"] == 15
+    assert row["level"] == 1
+    assert flash.message.lower().startswith("🎉")
 
 
-async def test_claim_skips_unfinished_job(db: Database) -> None:
-    user_id = 8
-    await db.get_or_create_player(user_id)
-    await db.conn.execute(
-        """
-        INSERT INTO training_jobs (discord_user_id, troop_codename, count,
-                                   started_at, finishes_at)
-        VALUES (?, 'catsith', 10, 0, 9999999999)
-        """,
-        (user_id,),
-    )
-    await db.conn.commit()
-    assert await claim_finished_training(db, user_id) is None
-    async with db.conn.execute(
-        "SELECT COUNT(*) FROM training_jobs WHERE discord_user_id = ?", (user_id,)
-    ) as cur:
-        row = await cur.fetchone()
-    assert row is not None
-    assert row[0] == 1
+async def test_summon_persists_pity_counter(db: Database) -> None:
+    hero_id = await _seed_hero(db, rarity="rare")
+    await db.get_or_create_player(1)
+    async with db.conn.execute("SELECT * FROM heroes WHERE id = ?", (hero_id,)) as cur:
+        hero_row = await cur.fetchone()
+    assert hero_row is not None
 
-
-async def test_claim_is_a_noop_when_no_job(db: Database) -> None:
-    user_id = 9
-    await db.get_or_create_player(user_id)
-    assert await claim_finished_training(db, user_id) is None
+    # Burn summons until either unlock or counter advances. We just verify the
+    # counter is monotonic and matches what's in the DB.
+    for expected in range(1, 4):
+        result, _ = await execute_summon(db, 1, hero_row)
+        if result.unlocked_now:
+            return
+        _, pity = await _fetch_shards(db, 1, hero_id)
+        assert pity == expected

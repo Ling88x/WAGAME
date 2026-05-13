@@ -42,21 +42,24 @@ Logs land in `data/wagame.log` (rotating) and stdout.
   Ready / Refresh). Each march takes 30 min and produces a fixed-base yield
   plus a small chance of a x2 crit. Capacity starts at 2 marches and tops out
   at 6 (research will unlock the extra slots).
-- `/summon` — Summoning Gate panel. Pick a troop from the dropdown, then
+- `/train` — Training Grounds panel. Pick a troop from the dropdown, then
   Train 1 / 10 / 50 / Max. One batch at a time; troops auto-arrive in your
   city when the timer ends. Cost is food only. Tiers beyond T1 are gated
   behind research.
 - `/army` — list the troops in your city, grouped by tier (ephemeral).
+- `/summon hero:<name>` — spend gems on a hero-specific summon chest.
+  Every summon yields ≥1 unlock shard; 100 shards unlocks the hero.
+  Pity guarantees an unlock by the 100th summon on the same hero.
 - `/research` — ephemeral panel with all 8 research nodes (Economy / Military
   / Logistics), one job in flight at a time, bonuses auto-apply when the
   timer ends. Cost is gold only; gather_yield/gather_speed scale the gather
-  rolls, training nodes scale the Summoning Gate, march slots and troop
+  rolls, training nodes scale the Training Grounds, march slots and troop
   tiers raise the relevant caps.
 - `/admin grant user:<@user> gold:<n> food:<n> wood:<n>` — owner only.
 - `/admin reset user:<@user>` — owner only; wipes the row.
 - `/admin grant-hero codename:<slug> user:<@user> level:<n>` — owner only;
   grants a hero from the catalog. Repeated grants of the same hero increment
-  `dupes_pending` instead of stacking, so the gacha PR can decide what to do
+  `dupes_pending` instead of stacking, so the level-up system can decide what to do
   with duplicates (shards / star-up / dust).
 - `/admin unlock-tier tier:<1-4> user:<@user>` — owner only; raise a
   player's max trainable troop tier (research PR will replace this).

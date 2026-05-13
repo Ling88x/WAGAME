@@ -19,9 +19,9 @@ INITIAL_COGS = (
     "wagame.cogs.admin",
     "wagame.cogs.heroes",
     "wagame.cogs.gather",
-    "wagame.cogs.summon",
+    "wagame.cogs.train",
     "wagame.cogs.research",
-    "wagame.cogs.gacha",
+    "wagame.cogs.summon",
 )
 
 

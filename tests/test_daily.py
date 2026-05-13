@@ -14,7 +14,7 @@ from wagame.game.daily import (
     claim_daily_if_due,
     current_reset_day,
 )
-from wagame.game.gacha import STARTING_GEMS
+from wagame.game.summon import STARTING_GEMS
 
 
 @pytest.fixture

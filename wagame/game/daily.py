@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime
 
 from wagame.db import Database
-from wagame.game.gacha import DAILY_GEM_BONUS
+from wagame.game.summon import DAILY_GEM_BONUS
 
 # In-game daily reset (also used by wahelper). Shifting `now - RESET_HOUR`
 # and taking the date gives the label of the current reset day.
