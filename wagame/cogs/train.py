@@ -217,10 +217,12 @@ async def _render_embed(
         ) as cur:
             troop_row = await cur.fetchone()
         name = troop_row["name"] if troop_row else job["troop_codename"]
-        left = max(0, int(job["finishes_at"]) - int(time.time()))
+        finishes_at = int(job["finishes_at"])
+        now = int(time.time())
+        when = "done!" if now >= finishes_at else f"ready <t:{finishes_at}:R>"
         embed.add_field(
             name="In progress",
-            value=f"{int(job['count']):,}x {name} — {format_duration(left) or 'done!'}",
+            value=f"{int(job['count']):,}x {name} — {when}",
             inline=False,
         )
     else:

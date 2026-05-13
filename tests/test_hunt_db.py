@@ -11,8 +11,10 @@ from wagame.cogs.hunt import (
     _bump_daily,
     _claim_daily,
     _daily_row,
+    _engage_march,
     _fetch_owned_heroes,
     _fetch_troops,
+    _finalize_march,
     _regen_and_persist,
     _resolve_march,
     _spawn_or_get,
@@ -132,6 +134,55 @@ async def test_resolve_march_chips_hp_when_not_killed(db: Database) -> None:
     spec = get_tenebral(3)
     assert summary["hp_after"] == spec.hp - 100_000
     assert "Lv3" in flash.message
+
+
+async def test_engage_applies_damage_without_resolving(db: Database) -> None:
+    await db.get_or_create_player(1)
+    hero_id = await _grant_hero(db, 1, "ghostpink")
+    march_id = await _insert_march(db, 1, level=3, hero_id=hero_id, damage=100_000)
+    flash, summary = await _engage_march(db, march_id)
+    assert summary["killed"] is False
+    assert "Lv3" in flash.message
+
+    async with db.conn.execute(
+        "SELECT engaged_at, resolved FROM hunt_marches WHERE id = ?", (march_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row["engaged_at"] is not None  # engagement timestamp recorded
+    assert int(row["resolved"]) == 0      # but return leg still pending
+
+
+async def test_engage_is_idempotent(db: Database) -> None:
+    await db.get_or_create_player(1)
+    hero_id = await _grant_hero(db, 1, "ghostpink")
+    march_id = await _insert_march(db, 1, level=3, hero_id=hero_id, damage=100_000)
+    await _engage_march(db, march_id)
+    # Mob HP after first engagement.
+    async with db.conn.execute(
+        "SELECT hp_remaining FROM tenebral_spawns WHERE discord_user_id = 1 AND level = 3"
+    ) as cur:
+        hp_after_first = int((await cur.fetchone())["hp_remaining"])
+
+    flash, summary = await _engage_march(db, march_id)
+    assert summary == {}
+    assert "Already engaged" in flash.message
+    # Mob HP unchanged.
+    async with db.conn.execute(
+        "SELECT hp_remaining FROM tenebral_spawns WHERE discord_user_id = 1 AND level = 3"
+    ) as cur:
+        assert int((await cur.fetchone())["hp_remaining"]) == hp_after_first
+
+
+async def test_finalize_marks_resolved(db: Database) -> None:
+    await db.get_or_create_player(1)
+    hero_id = await _grant_hero(db, 1, "ghostpink")
+    march_id = await _insert_march(db, 1, level=3, hero_id=hero_id, damage=100_000)
+    await _engage_march(db, march_id)
+    await _finalize_march(db, march_id)
+    async with db.conn.execute(
+        "SELECT resolved FROM hunt_marches WHERE id = ?", (march_id,)
+    ) as cur:
+        assert int((await cur.fetchone())["resolved"]) == 1
 
 
 async def test_resolve_march_kills_and_awards_reward(db: Database) -> None:

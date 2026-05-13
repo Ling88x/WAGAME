@@ -213,13 +213,12 @@ async def _render_embed(
     if job is not None:
         node = get_node(job["node_codename"])
         name = node.name if node else job["node_codename"]
-        left = max(0, int(job["finishes_at"]) - int(time.time()))
+        finishes_at = int(job["finishes_at"])
+        now = int(time.time())
+        when = "done!" if now >= finishes_at else f"ready <t:{finishes_at}:R>"
         embed.add_field(
             name="In progress",
-            value=(
-                f"{name} -> Lv {int(job['target_level'])} — "
-                f"{format_duration(left) or 'done!'}"
-            ),
+            value=f"{name} -> Lv {int(job['target_level'])} — {when}",
             inline=False,
         )
     else:

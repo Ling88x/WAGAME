@@ -226,14 +226,21 @@ async def _bump_daily(db: Database, user_id: int) -> int:
     return int(row["kills"])
 
 
-async def _resolve_march(db: Database, march_id: int) -> tuple[Flash, dict]:
-    """Apply damage from a march to its tenebral spawn. Returns (flash, summary)."""
+async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
+    """Outbound leg complete: apply damage, award rewards if killed, set engaged_at.
+
+    Does NOT mark `resolved`; the return leg still has to run before the
+    march counts as finalised. Idempotent against re-entry — if engaged_at
+    is already populated, returns a no-op flash without re-applying damage.
+    """
     async with db.conn.execute(
-        "SELECT * FROM hunt_marches WHERE id = ? AND resolved = 0", (march_id,)
+        "SELECT * FROM hunt_marches WHERE id = ?", (march_id,)
     ) as cur:
         march = await cur.fetchone()
     if march is None:
-        return Flash.err("March already resolved."), {}
+        return Flash.err("March not found."), {}
+    if march["engaged_at"] is not None:
+        return Flash.info("Already engaged."), {}
 
     user_id = int(march["discord_user_id"])
     level = int(march["level"])
@@ -256,7 +263,6 @@ async def _resolve_march(db: Database, march_id: int) -> tuple[Flash, dict]:
     }
 
     if killed:
-        # Despawn, award rewards, bump quota, grant hero XP.
         reward = kill_reward(level)
         summary["reward"] = reward
         await db.conn.execute(
@@ -296,7 +302,8 @@ async def _resolve_march(db: Database, march_id: int) -> tuple[Flash, dict]:
         )
 
     await db.conn.execute(
-        "UPDATE hunt_marches SET resolved = 1 WHERE id = ?", (march_id,)
+        "UPDATE hunt_marches SET engaged_at = ? WHERE id = ?",
+        (int(time.time()), march_id),
     )
     await db.conn.commit()
 
@@ -309,6 +316,21 @@ async def _resolve_march(db: Database, march_id: int) -> tuple[Flash, dict]:
         flash = Flash.info(
             f"{spec.name} (Lv{level}) took {damage:,} dmg — {pct}% HP left."
         )
+    return flash, summary
+
+
+async def _finalize_march(db: Database, march_id: int) -> None:
+    """Return leg complete: mark resolved. Hero is now free for the next march."""
+    await db.conn.execute(
+        "UPDATE hunt_marches SET resolved = 1 WHERE id = ?", (march_id,)
+    )
+    await db.conn.commit()
+
+
+async def _resolve_march(db: Database, march_id: int) -> tuple[Flash, dict]:
+    """One-shot: engage + finalize. Used by cog_load drain and DB-level tests."""
+    flash, summary = await _engage_march(db, march_id)
+    await _finalize_march(db, march_id)
     return flash, summary
 
 
@@ -447,6 +469,36 @@ async def _render_embed(
               f"+{DAILY_QUOTA_REWARD_RSS['gold']:,} gold/food/wood",
         inline=False,
     )
+
+    # In-flight march, surfaced from DB so Refresh never erases it.
+    active = await _active_march(db, user.id)
+    if active is not None:
+        active_spec = get_tenebral(int(active["level"]))
+        started = int(active["started_at"])
+        completes = int(active["completes_at"])
+        midpoint = started + (completes - started) // 2
+        engaged_at = active["engaged_at"]
+        now = int(time.time())
+        if engaged_at is None:
+            # Outbound leg.
+            label = f"🏇 Marching to Lv{active_spec.level} {active_spec.name}"
+            if now >= midpoint:
+                # Resolver hasn't fired yet — show "engaging now".
+                value = "Engaging now…"
+            else:
+                value = (
+                    f"Engages <t:{midpoint}:R> · returns <t:{completes}:R>\n"
+                    f"Locked damage: {int(active['damage']):,}"
+                )
+        else:
+            # Return leg.
+            label = f"🛡️ Returning from Lv{active_spec.level} {active_spec.name}"
+            value = (
+                "Arriving now…"
+                if now >= completes
+                else f"Hero back home <t:{completes}:R>"
+            )
+        embed.add_field(name=label, value=value, inline=False)
 
     return embed
 
@@ -630,40 +682,38 @@ class HuntView(discord.ui.View):
             )
             return
 
-        seconds = faux_march_seconds(level, hero_march_speed_pct=hero_speed)
+        leg_seconds = faux_march_seconds(level, hero_march_speed_pct=hero_speed)
         now = int(time.time())
+        completes_at = now + 2 * leg_seconds
         async with self.db.conn.execute(
             """
             INSERT INTO hunt_marches
               (discord_user_id, level, hero_id, started_at, completes_at, damage)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (interaction.user.id, level, hero_id, now, now + seconds, power),
+            (interaction.user.id, level, hero_id, now, completes_at, power),
         ) as cur:
             march_id = cur.lastrowid
         await self.db.conn.commit()
 
-        # Defer so we can sleep, then edit the panel in-place mid-flight.
+        # Defer so we can sleep across the round trip and edit in-place.
         await interaction.response.defer()
-        marching_flash = Flash.info(
-            f"🏇 March to Lv{level} {spec.name} in flight — {seconds}s · {power:,} dmg loaded."
-        )
-        embed = await _render_embed(
-            self.db, interaction.user, self.selected_level, self.selected_hero_id
-        )
-        apply_flash(embed, marching_flash)
-        await interaction.edit_original_response(embed=embed, view=self)
+        await self.refresh(interaction)  # picks up the outbound row from DB
 
-        await asyncio.sleep(seconds)
-
-        flash, summary = await _resolve_march(self.db, int(march_id))
-        # If the kill cascaded the hero past a level, surface that in the flash.
+        # Outbound leg: hero travels to the mob.
+        await asyncio.sleep(leg_seconds)
+        engage_flash, summary = await _engage_march(self.db, int(march_id))
         if summary.get("killed") and summary.get("hero_levels_gained"):
-            flash = Flash.ok(
-                f"{flash.message} Hero +{summary['hero_levels_gained']} lv "
+            engage_flash = Flash.ok(
+                f"{engage_flash.message} Hero +{summary['hero_levels_gained']} lv "
                 f"(now Lv{summary['hero_level_after']})."
             )
-        await self.refresh(interaction, flash=flash)
+        await self.refresh(interaction, flash=engage_flash)
+
+        # Return leg: hero rides home; rewards already credited at engagement.
+        await asyncio.sleep(leg_seconds)
+        await _finalize_march(self.db, int(march_id))
+        await self.refresh(interaction)
 
     @discord.ui.button(label="Claim Daily", emoji="🎁", style=discord.ButtonStyle.success, row=0)
     async def claim_daily(

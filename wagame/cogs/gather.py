@@ -22,9 +22,7 @@ from wagame.game.gather import (
     GATHER_DURATION_SECONDS,
     MAX_SLOTS,
     Resource,
-    format_remaining,
     is_finished,
-    remaining_seconds,
     roll_gather,
 )
 from wagame.ui import Flash, apply_flash
@@ -161,11 +159,13 @@ async def _render_embed(db: Database, user: discord.abc.User) -> discord.Embed:
         lines: list[str] = []
         for i, row in enumerate(marches, start=1):
             emoji = RESOURCE_EMOJI.get(row["resource"], "•")
-            if is_finished(int(row["finishes_at"]), now):
+            finishes_at = int(row["finishes_at"])
+            if is_finished(finishes_at, now):
                 lines.append(f"`{i}.` {emoji} {row['resource']} — **ready to claim**")
             else:
-                left = format_remaining(remaining_seconds(int(row["finishes_at"]), now))
-                lines.append(f"`{i}.` {emoji} {row['resource']} — {left}")
+                lines.append(
+                    f"`{i}.` {emoji} {row['resource']} — claims <t:{finishes_at}:R>"
+                )
         embed.add_field(name="In progress", value="\n".join(lines), inline=False)
     else:
         embed.add_field(
