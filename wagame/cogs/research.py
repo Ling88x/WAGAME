@@ -17,6 +17,7 @@ from discord.ext import commands
 from wagame.db import Database
 from wagame.game.research import format_duration, plan_research, prereq_met
 from wagame.research_data import NODES, TRACK_LABEL, ResearchNode, get_node
+from wagame.ui import Flash, apply_flash
 
 # Whitelist of columns the Research system is allowed to mutate. Defensive:
 # `effect_column` flows from a static catalog but we still gate every UPDATE
@@ -123,33 +124,31 @@ async def claim_finished_research(
     return node.name, new_level
 
 
-async def start_research(
-    db: Database, user_id: int, node_codename: str
-) -> tuple[bool, str]:
-    """Spend gold, schedule a research job for the next level. (ok, message)."""
+async def start_research(db: Database, user_id: int, node_codename: str) -> Flash:
+    """Spend gold, schedule a research job for the next level."""
     node = get_node(node_codename)
     if node is None:
-        return False, f"Unknown research node `{node_codename}`."
+        return Flash.err(f"Unknown research node `{node_codename}`.")
 
     # Auto-claim so a finished job can't block a new one.
     await claim_finished_research(db, user_id)
 
     if await _fetch_job(db, user_id) is not None:
-        return False, "A research project is already in progress."
+        return Flash.err("A research project is already in progress.")
 
     player = await _fetch_player(db, user_id)
     levels = await _fetch_levels(db, user_id)
     current = levels.get(node.codename, 0)
 
     if current >= node.max_level:
-        return False, f"{node.name} is already maxed (level {node.max_level})."
+        return Flash.err(f"{node.name} is already maxed (level {node.max_level}).")
 
     if node.requires is not None:
         prereq_level = levels.get(node.requires, 0)
         if not prereq_met(node, prereq_level):
             prereq_node = get_node(node.requires)
             prereq_name = prereq_node.name if prereq_node else node.requires
-            return False, (
+            return Flash.err(
                 f"{node.name} requires {prereq_name} level {node.requires_level}."
             )
 
@@ -157,7 +156,7 @@ async def start_research(
     plan = plan_research(node, target_level)
     gold_have = int(player["gold"])
     if plan.gold_cost > gold_have:
-        return False, (
+        return Flash.err(
             f"Not enough gold — need {plan.gold_cost:,}, have {gold_have:,}."
         )
 
@@ -175,7 +174,7 @@ async def start_research(
         (user_id, node.codename, target_level, now, now + plan.total_seconds),
     )
     await db.conn.commit()
-    return True, (
+    return Flash.ok(
         f"Researching {node.name} Lv {target_level} — "
         f"{format_duration(plan.total_seconds)}, cost {plan.gold_cost:,} gold."
     )
@@ -200,16 +199,15 @@ async def _render_embed(
     db: Database,
     user: discord.abc.User,
     selected_codename: str | None,
-    flash: str | None = None,
+    flash: Flash | None = None,
 ) -> discord.Embed:
     player = await _fetch_player(db, user.id)
     levels = await _fetch_levels(db, user.id)
     job = await _fetch_job(db, user.id)
 
-    embed = discord.Embed(title="Research", color=discord.Color.blue())
+    embed = discord.Embed(title="🔬 Research")
     embed.set_thumbnail(url=user.display_avatar.url)
-    if flash:
-        embed.description = f"**{flash}**"
+    apply_flash(embed, flash)
     embed.add_field(name="💰 Gold", value=f"{player['gold']:,}", inline=True)
 
     if job is not None:
@@ -321,7 +319,7 @@ class ResearchView(discord.ui.View):
         return True
 
     async def refresh(
-        self, interaction: discord.Interaction, flash: str | None = None
+        self, interaction: discord.Interaction, flash: Flash | None = None
     ) -> None:
         await claim_finished_research(self.db, interaction.user.id)
         embed = await _render_embed(
@@ -336,12 +334,14 @@ class ResearchView(discord.ui.View):
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
         if not self.selected_codename:
-            await self.refresh(interaction, flash="Pick a node from the dropdown first.")
+            await self.refresh(
+                interaction, flash=Flash.info("Pick a node from the dropdown first.")
+            )
             return
-        _, msg = await start_research(
+        result = await start_research(
             self.db, interaction.user.id, self.selected_codename
         )
-        await self.refresh(interaction, flash=msg)
+        await self.refresh(interaction, flash=result)
 
     @discord.ui.button(
         label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, row=1
@@ -367,10 +367,10 @@ class ResearchCog(commands.Cog):
     async def research(self, interaction: discord.Interaction) -> None:
         await self.db.get_or_create_player(interaction.user.id)
         claimed = await claim_finished_research(self.db, interaction.user.id)
-        flash = None
+        flash: Flash | None = None
         if claimed:
             name, level = claimed
-            flash = f"Research complete: {name} Lv {level}."
+            flash = Flash.ok(f"Research complete: {name} Lv {level}.")
 
         view = ResearchView(self.db, interaction.user.id)
         embed = await _render_embed(self.db, interaction.user, None, flash)

@@ -27,6 +27,7 @@ from wagame.game.gather import (
     remaining_seconds,
     roll_gather,
 )
+from wagame.ui import Flash, apply_flash
 
 RESOURCE_EMOJI: dict[str, str] = {"gold": "💰", "food": "🍞", "wood": "🌲"}
 
@@ -65,12 +66,14 @@ async def _fetch_marches(db: Database, user_id: int):
         return await cur.fetchall()
 
 
-async def _start_gather(db: Database, user_id: int, resource: Resource) -> tuple[bool, str]:
+async def _start_gather(db: Database, user_id: int, resource: Resource) -> Flash:
     player = await _fetch_player(db, user_id)
     capacity = int(player["march_capacity"])
     marches = await _fetch_marches(db, user_id)
     if len(marches) >= capacity:
-        return False, f"All {capacity} march slot(s) busy — claim a finished gather first."
+        return Flash.err(
+            f"All {capacity} march slot(s) busy — claim a finished gather first."
+        )
 
     roll = roll_gather(resource)
     yield_pct = int(player["gather_yield_pct"])
@@ -89,7 +92,7 @@ async def _start_gather(db: Database, user_id: int, resource: Resource) -> tuple
         (user_id, resource, now, finishes_at, boosted_base, 1 if roll.crit else 0),
     )
     await db.conn.commit()
-    return True, f"Sent a march to gather {resource}."
+    return Flash.ok(f"Sent a march to gather {resource}.")
 
 
 async def _claim_ready(db: Database, user_id: int) -> tuple[int, dict[Resource, int], int]:
@@ -141,7 +144,7 @@ async def _render_embed(db: Database, user: discord.abc.User) -> discord.Embed:
     capacity = int(player["march_capacity"])
     now = int(time.time())
 
-    embed = discord.Embed(title="Gathering", color=discord.Color.green())
+    embed = discord.Embed(title="⛏️ Gathering")
     embed.set_thumbnail(url=user.display_avatar.url)
     embed.add_field(name="💰 Gold", value=f"{player['gold']:,}", inline=True)
     embed.add_field(name="🍞 Food", value=f"{player['food']:,}", inline=True)
@@ -196,18 +199,19 @@ class GatherView(discord.ui.View):
             return False
         return True
 
-    async def _refresh(self, interaction: discord.Interaction, flash: str | None = None) -> None:
+    async def _refresh(
+        self, interaction: discord.Interaction, flash: Flash | None = None
+    ) -> None:
         embed = await _render_embed(self.db, interaction.user)
-        if flash:
-            # Surface the action result above the resource block so it's the
-            # first thing the player sees after clicking.
-            existing = embed.description or ""
-            embed.description = f"**{flash}**\n{existing}".strip()
+        apply_flash(embed, flash)
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def _start(self, interaction: discord.Interaction, resource: Resource) -> None:
-        ok, msg = await _start_gather(self.db, interaction.user.id, resource)
-        await self._refresh(interaction, flash=msg if not ok else None)
+        result = await _start_gather(self.db, interaction.user.id, resource)
+        # Success is implicit (the panel shows the new march); only red-flag failures.
+        await self._refresh(
+            interaction, flash=result if result.outcome.value == "error" else None
+        )
 
     @discord.ui.button(label="Gold", emoji="💰", style=discord.ButtonStyle.primary, row=0)
     async def start_gold(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -225,13 +229,13 @@ class GatherView(discord.ui.View):
     async def claim(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         count, totals, crits = await _claim_ready(self.db, interaction.user.id)
         if count == 0:
-            await self._refresh(interaction, flash="Nothing finished yet.")
+            await self._refresh(interaction, flash=Flash.info("Nothing finished yet."))
             return
         parts = [f"{v:,} {k}" for k, v in totals.items() if v]
-        flash = f"Claimed {count} march(es): " + ", ".join(parts)
+        msg = f"Claimed {count} march(es): " + ", ".join(parts)
         if crits:
-            flash += f" — {crits} crit{'s' if crits > 1 else ''}! ✨"
-        await self._refresh(interaction, flash=flash)
+            msg += f" — {crits} crit{'s' if crits > 1 else ''}! ✨"
+        await self._refresh(interaction, flash=Flash.ok(msg))
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, row=1)
     async def refresh(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:

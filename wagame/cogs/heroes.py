@@ -13,6 +13,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from wagame.db import Database
+from wagame.ui import Outcome, toast
 
 RARITY_COLOR = {
     "common": discord.Color.light_grey(),
@@ -58,8 +59,11 @@ class HeroesCog(commands.Cog):
 
         if not rows:
             await interaction.response.send_message(
-                "You don't own any heroes yet. Once gacha is live, summon one — "
-                "for now an admin can grant you one with `/admin grant-hero`.",
+                embed=toast(
+                    "You don't own any heroes yet. Once gacha is live, summon one — "
+                    "for now an admin can grant you one with `/admin grant-hero`.",
+                    Outcome.INFO,
+                ),
                 ephemeral=True,
             )
             return
@@ -94,7 +98,10 @@ class HeroesCog(commands.Cog):
 
         if row is None:
             await interaction.response.send_message(
-                f"No hero with codename `{codename}` in the catalog.",
+                embed=toast(
+                    f"No hero with codename `{codename}` in the catalog.",
+                    Outcome.ERROR,
+                ),
                 ephemeral=True,
             )
             return

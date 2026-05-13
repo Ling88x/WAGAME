@@ -19,6 +19,7 @@ from wagame.game.gather import (
     remaining_seconds,
     roll_gather,
 )
+from wagame.ui import Outcome
 
 
 @pytest.fixture
@@ -74,8 +75,8 @@ def test_format_remaining_units() -> None:
 
 async def test_start_gather_persists_row(db: Database) -> None:
     await db.get_or_create_player(1)
-    ok, _ = await _start_gather(db, 1, "food")
-    assert ok
+    result = await _start_gather(db, 1, "food")
+    assert result.outcome == Outcome.SUCCESS
     async with db.conn.execute(
         "SELECT resource, yield_amount, crit FROM marches WHERE discord_user_id = 1"
     ) as cur:
@@ -90,11 +91,11 @@ async def test_start_gather_persists_row(db: Database) -> None:
 async def test_start_gather_respects_capacity(db: Database) -> None:
     await db.get_or_create_player(2)  # capacity = 2 by default
     for _ in range(2):
-        ok, _ = await _start_gather(db, 2, "wood")
-        assert ok
-    ok, msg = await _start_gather(db, 2, "wood")
-    assert not ok
-    assert "busy" in msg.lower()
+        result = await _start_gather(db, 2, "wood")
+        assert result.outcome == Outcome.SUCCESS
+    result = await _start_gather(db, 2, "wood")
+    assert result.outcome == Outcome.ERROR
+    assert "busy" in result.message.lower()
 
 
 async def test_claim_ready_credits_resources_and_clears_rows(db: Database) -> None:

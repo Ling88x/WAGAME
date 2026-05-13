@@ -18,6 +18,7 @@ from wagame.game.research import (
     prereq_met,
 )
 from wagame.research_data import NODES, NODES_BY_CODENAME, get_node
+from wagame.ui import Outcome
 
 
 @pytest.fixture
@@ -107,8 +108,8 @@ async def test_start_research_charges_gold_and_creates_job(db: Database) -> None
     )
     await db.conn.commit()
 
-    ok, _ = await start_research(db, user_id, "gather_yield")
-    assert ok
+    result = await start_research(db, user_id, "gather_yield")
+    assert result.outcome == Outcome.SUCCESS
 
     async with db.conn.execute(
         "SELECT gold FROM players WHERE discord_user_id = ?", (user_id,)
@@ -130,9 +131,9 @@ async def test_start_research_charges_gold_and_creates_job(db: Database) -> None
 async def test_start_research_rejects_when_short_on_gold(db: Database) -> None:
     user_id = 2
     await db.get_or_create_player(user_id)
-    ok, msg = await start_research(db, user_id, "gather_yield")
-    assert not ok
-    assert "gold" in msg.lower()
+    result = await start_research(db, user_id, "gather_yield")
+    assert result.outcome == Outcome.ERROR
+    assert "gold" in result.message.lower()
 
 
 async def test_start_research_rejects_concurrent_job(db: Database) -> None:
@@ -142,10 +143,11 @@ async def test_start_research_rejects_concurrent_job(db: Database) -> None:
         "UPDATE players SET gold = 100000 WHERE discord_user_id = ?", (user_id,)
     )
     await db.conn.commit()
-    assert (await start_research(db, user_id, "gather_yield"))[0]
-    ok, msg = await start_research(db, user_id, "gather_speed")
-    assert not ok
-    assert "already" in msg.lower()
+    first = await start_research(db, user_id, "gather_yield")
+    assert first.outcome == Outcome.SUCCESS
+    second = await start_research(db, user_id, "gather_speed")
+    assert second.outcome == Outcome.ERROR
+    assert "already" in second.message.lower()
 
 
 async def test_start_research_blocks_locked_prereq(db: Database) -> None:
@@ -156,9 +158,9 @@ async def test_start_research_blocks_locked_prereq(db: Database) -> None:
     )
     await db.conn.commit()
     # training_speed requires training_queue lvl 2.
-    ok, msg = await start_research(db, user_id, "training_speed")
-    assert not ok
-    assert "requires" in msg.lower()
+    result = await start_research(db, user_id, "training_speed")
+    assert result.outcome == Outcome.ERROR
+    assert "requires" in result.message.lower()
 
 
 async def test_start_research_rejects_maxed_node(db: Database) -> None:
@@ -174,9 +176,9 @@ async def test_start_research_rejects_maxed_node(db: Database) -> None:
         (user_id, node.codename, node.max_level),
     )
     await db.conn.commit()
-    ok, msg = await start_research(db, user_id, "gather_yield")
-    assert not ok
-    assert "maxed" in msg.lower()
+    result = await start_research(db, user_id, "gather_yield")
+    assert result.outcome == Outcome.ERROR
+    assert "maxed" in result.message.lower()
 
 
 # -- claim_finished_research -----------------------------------------------
@@ -287,8 +289,8 @@ async def test_gather_yield_pct_is_applied_at_start(db: Database) -> None:
     )
     await db.conn.commit()
 
-    ok, _ = await _start_gather(db, user_id, "food")
-    assert ok
+    result = await _start_gather(db, user_id, "food")
+    assert result.outcome == Outcome.SUCCESS
 
     async with db.conn.execute(
         "SELECT yield_amount FROM marches WHERE discord_user_id = ?", (user_id,)
@@ -311,8 +313,8 @@ async def test_gather_speed_pct_shortens_duration(db: Database) -> None:
     )
     await db.conn.commit()
 
-    ok, _ = await _start_gather(db, user_id, "wood")
-    assert ok
+    result = await _start_gather(db, user_id, "wood")
+    assert result.outcome == Outcome.SUCCESS
 
     async with db.conn.execute(
         "SELECT started_at, finishes_at FROM marches WHERE discord_user_id = ?",

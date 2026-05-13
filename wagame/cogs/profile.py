@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from wagame.db import Database
+from wagame.ui import NEUTRAL_COLOR
 
 
 class ProfileCog(commands.Cog):
@@ -26,8 +27,8 @@ class ProfileCog(commands.Cog):
 
 def _profile_embed(user: discord.abc.User, player) -> discord.Embed:
     embed = discord.Embed(
-        title=f"{user.display_name}'s Profile",
-        color=discord.Color.purple(),
+        title=f"🧙 {user.display_name}'s Profile",
+        color=NEUTRAL_COLOR,
     )
     embed.set_thumbnail(url=user.display_avatar.url)
     embed.add_field(name="Level", value=f"{player['player_level']}", inline=True)

@@ -16,6 +16,7 @@ from wagame.game.summon import (
     total_train_seconds,
 )
 from wagame.troops_data import TROOPS, sync_troops
+from wagame.ui import Outcome
 
 
 @pytest.fixture
@@ -122,8 +123,8 @@ async def test_start_training_succeeds_for_t1_with_food(db: Database) -> None:
     )
     await db.conn.commit()
 
-    ok, msg = await start_training(db, user_id, "catsith", 10)
-    assert ok, msg
+    result = await start_training(db, user_id, "catsith", 10)
+    assert result.outcome == Outcome.SUCCESS, result.message
 
     async with db.conn.execute(
         "SELECT food FROM players WHERE discord_user_id = ?", (user_id,)
@@ -150,18 +151,18 @@ async def test_start_training_blocks_locked_tier(db: Database) -> None:
     )
     await db.conn.commit()
 
-    ok, msg = await start_training(db, user_id, "gryphon", 1)
-    assert not ok
-    assert "locked" in msg.lower()
+    result = await start_training(db, user_id, "gryphon", 1)
+    assert result.outcome == Outcome.ERROR
+    assert "locked" in result.message.lower()
 
 
 async def test_start_training_blocks_when_food_short(db: Database) -> None:
     user_id = 3
     await db.get_or_create_player(user_id)
     # Default food is 0, T1 costs 15/unit.
-    ok, msg = await start_training(db, user_id, "catsith", 5)
-    assert not ok
-    assert "food" in msg.lower()
+    result = await start_training(db, user_id, "catsith", 5)
+    assert result.outcome == Outcome.ERROR
+    assert "food" in result.message.lower()
 
 
 async def test_start_training_blocks_above_queue_cap(db: Database) -> None:
@@ -171,9 +172,9 @@ async def test_start_training_blocks_above_queue_cap(db: Database) -> None:
         "UPDATE players SET food = 10000000 WHERE discord_user_id = ?", (user_id,)
     )
     await db.conn.commit()  # default queue cap = 50
-    ok, msg = await start_training(db, user_id, "catsith", 51)
-    assert not ok
-    assert "cap" in msg.lower()
+    result = await start_training(db, user_id, "catsith", 51)
+    assert result.outcome == Outcome.ERROR
+    assert "cap" in result.message.lower()
 
 
 async def test_start_training_rejects_second_concurrent_job(db: Database) -> None:
@@ -183,10 +184,11 @@ async def test_start_training_rejects_second_concurrent_job(db: Database) -> Non
         "UPDATE players SET food = 10000 WHERE discord_user_id = ?", (user_id,)
     )
     await db.conn.commit()
-    assert (await start_training(db, user_id, "catsith", 1))[0]
-    ok, msg = await start_training(db, user_id, "catsith", 1)
-    assert not ok
-    assert "already" in msg.lower()
+    first = await start_training(db, user_id, "catsith", 1)
+    assert first.outcome == Outcome.SUCCESS
+    result = await start_training(db, user_id, "catsith", 1)
+    assert result.outcome == Outcome.ERROR
+    assert "already" in result.message.lower()
 
 
 # -- claim_finished_training ------------------------------------------------

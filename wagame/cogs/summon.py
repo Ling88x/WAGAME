@@ -24,6 +24,7 @@ from wagame.game.summon import (
     max_affordable_count,
     plan_training,
 )
+from wagame.ui import Flash, apply_flash
 
 # Discord caps SelectMenu options at 25 — we only have 8 troops, plenty of room.
 
@@ -120,33 +121,35 @@ async def claim_finished_training(db: Database, user_id: int) -> tuple[str, int]
 
 async def start_training(
     db: Database, user_id: int, troop_codename: str, count: int
-) -> tuple[bool, str]:
-    """Attempt to start a new batch. Returns (ok, message)."""
+) -> Flash:
+    """Attempt to start a new batch."""
     if count <= 0:
-        return False, "Count must be at least 1."
+        return Flash.err("Count must be at least 1.")
 
     # Auto-claim first so a finished job can't block a new one.
     await claim_finished_training(db, user_id)
 
     if await _fetch_job(db, user_id) is not None:
-        return False, "A training batch is already in progress."
+        return Flash.err("A training batch is already in progress.")
 
     player = await _fetch_player(db, user_id)
     troop = await _fetch_troop(db, troop_codename)
     if troop is None:
-        return False, f"Unknown troop `{troop_codename}`."
+        return Flash.err(f"Unknown troop `{troop_codename}`.")
     if int(troop["tier"]) > int(player["unlocked_tier"]):
-        return False, f"{troop['name']} is locked — unlock T{troop['tier']} via research."
+        return Flash.err(
+            f"{troop['name']} is locked — unlock T{troop['tier']} via research."
+        )
 
     cap = int(player["training_queue_cap"])
     if count > cap:
-        return False, f"Batch size capped at {cap:,} (your queue cap)."
+        return Flash.err(f"Batch size capped at {cap:,} (your queue cap).")
 
     food_have = int(player["food"])
     food_per_unit = int(troop["food_per_unit"])
     cost = food_per_unit * count
     if cost > food_have:
-        return False, f"Not enough food — need {cost:,}, have {food_have:,}."
+        return Flash.err(f"Not enough food — need {cost:,}, have {food_have:,}.")
 
     plan = plan_training(
         troop_codename=troop_codename,
@@ -170,7 +173,7 @@ async def start_training(
         (user_id, troop_codename, plan.count, now, now + plan.total_seconds),
     )
     await db.conn.commit()
-    return True, (
+    return Flash.ok(
         f"Training {plan.count:,}x {troop['name']} — "
         f"{format_duration(plan.total_seconds)}, cost {plan.food_cost:,} food."
     )
@@ -183,16 +186,15 @@ async def _render_embed(
     db: Database,
     user: discord.abc.User,
     selected_codename: str | None,
-    flash: str | None = None,
+    flash: Flash | None = None,
 ) -> discord.Embed:
     player = await _fetch_player(db, user.id)
     job = await _fetch_job(db, user.id)
     troops = await _fetch_unlocked_troops(db, int(player["unlocked_tier"]))
 
-    embed = discord.Embed(title="Summoning Gate", color=discord.Color.dark_purple())
+    embed = discord.Embed(title="⚔️ Summoning Gate")
     embed.set_thumbnail(url=user.display_avatar.url)
-    if flash:
-        embed.description = f"**{flash}**"
+    apply_flash(embed, flash)
 
     embed.add_field(name="🍞 Food", value=f"{player['food']:,}", inline=True)
     embed.add_field(
@@ -296,21 +298,25 @@ class SummonView(discord.ui.View):
             return False
         return True
 
-    async def refresh(self, interaction: discord.Interaction, flash: str | None = None) -> None:
+    async def refresh(
+        self, interaction: discord.Interaction, flash: Flash | None = None
+    ) -> None:
         await claim_finished_training(self.db, interaction.user.id)
         embed = await _render_embed(self.db, interaction.user, self.selected_codename, flash)
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def _train(self, interaction: discord.Interaction, amount: int | str) -> None:
         if not self.selected_codename:
-            await self.refresh(interaction, flash="Pick a unit from the dropdown first.")
+            await self.refresh(
+                interaction, flash=Flash.info("Pick a unit from the dropdown first.")
+            )
             return
 
         # Resolve "max" against current resources, queue cap, and food cost.
         player = await _fetch_player(self.db, interaction.user.id)
         troop = await _fetch_troop(self.db, self.selected_codename)
         if troop is None:
-            await self.refresh(interaction, flash="That unit no longer exists.")
+            await self.refresh(interaction, flash=Flash.err("That unit no longer exists."))
             return
 
         if amount == "max":
@@ -320,15 +326,17 @@ class SummonView(discord.ui.View):
                 queue_cap=int(player["training_queue_cap"]),
             )
             if count <= 0:
-                await self.refresh(interaction, flash="You can't afford even one unit.")
+                await self.refresh(
+                    interaction, flash=Flash.err("You can't afford even one unit.")
+                )
                 return
         else:
             count = int(amount)
 
-        _, msg = await start_training(
+        result = await start_training(
             self.db, interaction.user.id, self.selected_codename, count
         )
-        await self.refresh(interaction, flash=msg)
+        await self.refresh(interaction, flash=result)
 
     @discord.ui.button(label="Train 1", style=discord.ButtonStyle.primary, row=1)
     async def train_1(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
@@ -370,10 +378,10 @@ class SummonCog(commands.Cog):
         claimed = await claim_finished_training(self.db, interaction.user.id)
         player = await _fetch_player(self.db, interaction.user.id)
         troops = await _fetch_unlocked_troops(self.db, int(player["unlocked_tier"]))
-        flash = None
+        flash: Flash | None = None
         if claimed:
             name, count = claimed
-            flash = f"Training complete: {count:,}x {name} arrived in your city."
+            flash = Flash.ok(f"Training complete: {count:,}x {name} arrived in your city.")
 
         view = SummonView(self.db, interaction.user.id, troops)
         embed = await _render_embed(self.db, interaction.user, None, flash)
@@ -385,13 +393,12 @@ class SummonCog(commands.Cog):
         claimed = await claim_finished_training(self.db, interaction.user.id)
         rows = await _fetch_owned(self.db, interaction.user.id)
 
-        embed = discord.Embed(
-            title=f"{interaction.user.display_name}'s Army",
-            color=discord.Color.dark_purple(),
-        )
+        embed = discord.Embed(title=f"🪖 {interaction.user.display_name}'s Army")
+        flash: Flash | None = None
         if claimed:
             name, count = claimed
-            embed.description = f"Training complete: **{count:,}x {name}** just arrived."
+            flash = Flash.ok(f"Training complete: {count:,}x {name} just arrived.")
+        apply_flash(embed, flash)
 
         if not rows:
             embed.add_field(
