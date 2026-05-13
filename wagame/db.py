@@ -70,6 +70,15 @@ class Database:
             (discord_user_id,),
         )
         await self.conn.commit()
+
+        # Daily +100 gems is auto-collected on the first interaction past
+        # the WA reset hour. The helper is idempotent — repeated calls
+        # within the same reset day return 0 and don't touch the DB.
+        # Local import keeps db.py free of game-logic dependencies at
+        # module-load time (and dodges the heroes_data → db.py cycle).
+        from wagame.game.daily import claim_daily_if_due
+        await claim_daily_if_due(self, discord_user_id)
+
         async with self.conn.execute(
             "SELECT * FROM players WHERE discord_user_id = ?", (discord_user_id,)
         ) as cur:

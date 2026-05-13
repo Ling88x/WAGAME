@@ -33,6 +33,7 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
         gold="Gold to add.",
         food="Food to add.",
         wood="Wood to add.",
+        gems="Gems to add.",
     )
     @app_commands.check(_is_bot_owner)
     async def grant(
@@ -42,17 +43,19 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
         gold: int = 0,
         food: int = 0,
         wood: int = 0,
+        gems: int = 0,
     ) -> None:
         target = user or interaction.user
         await self.db.get_or_create_player(target.id)
         await self.db.conn.execute(
-            "UPDATE players SET gold = gold + ?, food = food + ?, wood = wood + ? "
-            "WHERE discord_user_id = ?",
-            (gold, food, wood, target.id),
+            "UPDATE players SET gold = gold + ?, food = food + ?, wood = wood + ?, "
+            "gems = gems + ? WHERE discord_user_id = ?",
+            (gold, food, wood, gems, target.id),
         )
         await self.db.conn.commit()
         await interaction.response.send_message(
-            f"Granted to {target.mention}: gold +{gold:,}, food +{food:,}, wood +{wood:,}.",
+            f"Granted to {target.mention}: gold +{gold:,}, food +{food:,}, "
+            f"wood +{wood:,}, gems +{gems:,}.",
             ephemeral=True,
         )
 

@@ -33,11 +33,12 @@ def _profile_embed(user: discord.abc.User, player) -> discord.Embed:
     embed.set_thumbnail(url=user.display_avatar.url)
     embed.add_field(name="Level", value=f"{player['player_level']}", inline=True)
     embed.add_field(name="Marches", value=f"{player['march_capacity']}", inline=True)
-    embed.add_field(name="​", value="​", inline=True)
+    embed.add_field(name="💎 Gems", value=f"{player['gems']:,}", inline=True)
     embed.add_field(name="Gold", value=f"{player['gold']:,}", inline=True)
     embed.add_field(name="Food", value=f"{player['food']:,}", inline=True)
     embed.add_field(name="Wood", value=f"{player['wood']:,}", inline=True)
-    embed.set_footer(text=f"Joined {player['created_at']} UTC")
+    daily = player["last_daily_claim_date"] or "never"
+    embed.set_footer(text=f"Joined {player['created_at']} UTC · Last daily: {daily}")
     return embed
 
 

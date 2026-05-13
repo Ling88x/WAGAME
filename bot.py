@@ -21,6 +21,7 @@ INITIAL_COGS = (
     "wagame.cogs.gather",
     "wagame.cogs.summon",
     "wagame.cogs.research",
+    "wagame.cogs.gacha",
 )
 
 
