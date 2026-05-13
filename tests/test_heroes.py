@@ -171,9 +171,11 @@ async def test_autocomplete_matches_codename_substring(db: Database) -> None:
             ),
         ],
     )
+    # "lava" matches the codename "waterlava"; the suggestion still surfaces
+    # by display name in both label and submitted value.
     choices = await _autocomplete_hero(db, "lava")
     assert len(choices) == 1
-    assert choices[0].value == "waterlava"
+    assert choices[0].value == "Lyria Ignis"
     assert "Lyria Ignis" in choices[0].name
 
 
@@ -196,7 +198,7 @@ async def test_autocomplete_matches_display_name_substring(db: Database) -> None
         ],
     )
     choices = await _autocomplete_hero(db, "rose")
-    assert any(c.value == "ghostpink" for c in choices)
+    assert any(c.value == "Roselda Graves" for c in choices)
 
 
 async def test_autocomplete_orders_mythic_before_rare(db: Database) -> None:
@@ -217,7 +219,7 @@ async def test_autocomplete_orders_mythic_before_rare(db: Database) -> None:
         ],
     )
     choices = await _autocomplete_hero(db, "match")
-    assert [c.value for c in choices] == ["bb", "aa"]
+    assert [c.value for c in choices] == ["Beta Match", "Alpha Match"]
 
 
 async def test_autocomplete_empty_query_returns_some_heroes(db: Database) -> None:

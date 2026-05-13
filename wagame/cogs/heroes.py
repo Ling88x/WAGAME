@@ -49,7 +49,13 @@ HEROES_PER_PAGE = 9
 async def _autocomplete_hero(
     db: Database, query: str, limit: int = 25
 ) -> list[app_commands.Choice[str]]:
-    """Suggest heroes by display name OR codename (case-insensitive contains)."""
+    """Suggest heroes by display name OR codename (case-insensitive contains).
+
+    Both `name` (what the dropdown shows) and `value` (what gets submitted)
+    use the hero's display name — codenames are an implementation detail
+    nobody should have to memorize. Display names on the kohqs roster are
+    unique, so we look the hero up by name on the receiving end.
+    """
     q = f"%{query.strip().lower()}%"
     async with db.conn.execute(
         """
@@ -75,7 +81,7 @@ async def _autocomplete_hero(
     return [
         app_commands.Choice(
             name=f"{RARITY_EMOJI.get(r['rarity'], '•')} {r['name']}",
-            value=r["codename"],
+            value=r["name"],
         )
         for r in rows
     ]
@@ -251,17 +257,16 @@ class HeroesCog(commands.Cog):
     )
     @app_commands.describe(hero="Search by name or codename — pick from suggestions.")
     async def hero(self, interaction: discord.Interaction, hero: str) -> None:
-        codename = hero.strip().lower()
+        # Autocomplete submits the display name; we still accept a raw codename
+        # as a power-user fallback so legacy links / muscle-memory don't break.
+        needle = hero.strip().lower()
         async with self.db.conn.execute(
-            "SELECT * FROM heroes WHERE codename = ?", (codename,)
+            "SELECT * FROM heroes WHERE LOWER(name) = ?", (needle,)
         ) as cur:
             row = await cur.fetchone()
-
-        # Fall back to a name lookup so users who type the display name directly
-        # (without picking from autocomplete) still hit something useful.
         if row is None:
             async with self.db.conn.execute(
-                "SELECT * FROM heroes WHERE LOWER(name) = ?", (codename,)
+                "SELECT * FROM heroes WHERE codename = ?", (needle,)
             ) as cur:
                 row = await cur.fetchone()
 

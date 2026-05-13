@@ -98,14 +98,13 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
             return
 
         async with self.db.conn.execute(
-            "SELECT id, name FROM heroes WHERE codename = ?", (codename,)
+            "SELECT id, name FROM heroes WHERE LOWER(name) = ?", (codename,)
         ) as cur:
             hero_row = await cur.fetchone()
-        # Owner may have typed the display name directly instead of clicking a
-        # suggestion — fall back to a name-exact lookup.
+        # Codename still accepted as a power-user fallback.
         if hero_row is None:
             async with self.db.conn.execute(
-                "SELECT id, name FROM heroes WHERE LOWER(name) = ?", (codename,)
+                "SELECT id, name FROM heroes WHERE codename = ?", (codename,)
             ) as cur:
                 hero_row = await cur.fetchone()
         if hero_row is None:
