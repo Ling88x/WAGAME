@@ -248,9 +248,12 @@ class HeroesCog(commands.Cog):
 
         embeds = _build_page_embeds(interaction.user, rows, page=0)
         view = HeroesView(self.db, interaction.user.id, total=len(rows))
-        await interaction.response.send_message(
-            embeds=embeds, view=view if view.children else None, ephemeral=True
-        )
+        # discord.py 2.4 rejects view=None — pass the kwarg only when the
+        # view has nav buttons (multi-page rosters).
+        kwargs: dict = {"embeds": embeds, "ephemeral": True}
+        if view.children:
+            kwargs["view"] = view
+        await interaction.response.send_message(**kwargs)
 
     @app_commands.command(
         name="hero", description="Show full info about a hero from the catalog."
