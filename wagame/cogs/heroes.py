@@ -17,6 +17,12 @@ from discord import app_commands
 from discord.ext import commands
 
 from wagame.db import Database
+from wagame.game.hero_levels import (
+    STARTING_LEVEL_CAP,
+    atk_eff,
+    march_speed_pct,
+    xp_to_next,
+)
 from wagame.ui import NEUTRAL_COLOR, Outcome, toast
 
 RARITY_COLOR: dict[str, discord.Color] = {
@@ -90,7 +96,13 @@ async def _autocomplete_hero(
 # -- rendering --------------------------------------------------------------
 
 
-def _hero_card_embed(row, *, level: int | None = None, dupes: int = 0) -> discord.Embed:
+def _hero_card_embed(
+    row,
+    *,
+    level: int | None = None,
+    xp: int = 0,
+    dupes: int = 0,
+) -> discord.Embed:
     """One hero -> one mini-embed, colored by rarity, thumbnail if available."""
     color = RARITY_COLOR.get(row["rarity"], NEUTRAL_COLOR)
     title = row["name"]
@@ -110,6 +122,19 @@ def _hero_card_embed(row, *, level: int | None = None, dupes: int = 0) -> discor
     if row["house"]:
         traits.append(row["house"])
     embed.description = " · ".join(traits)
+
+    if level is not None:
+        atk = atk_eff(row["rarity"], level)
+        speed = march_speed_pct(level)
+        stats = f"⚔️ {atk:,}"
+        if speed:
+            stats += f" · 🏇 +{speed}%"
+        if level < STARTING_LEVEL_CAP:
+            stats += f" · 📈 {xp:,}/{xp_to_next(level):,} XP"
+        else:
+            stats += f" · 📈 MAX (+{xp:,} banked)"
+        embed.add_field(name="Stats", value=stats, inline=False)
+
     embed.set_footer(text=f"codename: {row['codename']}")
     return embed
 
@@ -144,7 +169,10 @@ def _build_page_embeds(user: discord.abc.User, rows, page: int) -> list[discord.
     start = page * HEROES_PER_PAGE
     slice_ = rows[start : start + HEROES_PER_PAGE]
     cards = [
-        _hero_card_embed(r, level=r["level"], dupes=r["dupes_pending"]) for r in slice_
+        _hero_card_embed(
+            r, level=r["level"], xp=r["xp"], dupes=r["dupes_pending"]
+        )
+        for r in slice_
     ]
     return [header, *cards]
 
@@ -198,7 +226,7 @@ async def _fetch_owned(db: Database, user_id: int):
     async with db.conn.execute(
         """
         SELECT h.codename, h.name, h.rarity, h.house, h.terrain, h.image_url,
-               o.level, o.dupes_pending
+               o.level, o.xp, o.dupes_pending
         FROM owned_heroes o
         JOIN heroes h ON h.id = o.hero_id
         WHERE o.discord_user_id = ?

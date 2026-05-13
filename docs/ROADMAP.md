@@ -16,9 +16,12 @@ edit as a discussion with the user.
 | #3 | Gathering         | ✅ shipped | 2 starting marches (cap 6 via future research), 30 min, fixed yield + 5% crit ×2, gold leaner than food/wood |
 | #4 | Summoning Gate    | ✅ shipped | Troop training, 1 queue, food-only cost, T1 only at start (research unlocks T2–T4) |
 | #5 | Research tree     | ✅ shipped | 8 nodes across Economy / Military / Logistics, 1 slot, gold-only cost, auto-apply on completion |
-| #6 | Combat            | ⏳ pending | Auto-battler loosely based on in-game WA; element triangle TBD; troops + commander hero per side |
-| #7 | Raids             | ⏳ pending | Solo PvE first (R1–R6 → void vesps → dominion boss). Energy gated. PvP raids later |
-| #8 | Daily / progression | ⏳ pending | Login rewards, streaks, account-wide XP — defer until PvE feels good |
+| #6 | Hero leveling     | ✅ shipped | XP curve `100×L^1.5`, +5% ATK / +2% march-speed per level, cap 30 (banked XP at cap), `/admin grant-hero-xp` |
+| #7 | Hunt (`/hunt`)    | ⏳ pending | 12-level tenebrals, energy cap 500 / regen 1pt-30s, faux-timer 30–90s march, RSS + Hero XP drop, daily quota |
+| #8 | Gather refactor   | ⏳ pending | Add hero slot, march time tied to hero march_speed_pct + research |
+| #9 | Combat            | ⏳ pending | Auto-battler loosely based on in-game WA; element triangle TBD; troops + commander hero per side |
+| #10 | Raids            | ⏳ pending | Solo PvE first (R1–R6 → void vesps → dominion boss). Energy gated. PvP raids later |
+| #11 | Daily / progression | ⏳ pending | Login rewards, streaks, account-wide XP — defer until PvE feels good |
 
 ---
 
@@ -127,6 +130,22 @@ When the relevant PR comes up, raise the item and ask whether to fold it in.
   consumed by Training Grounds, gold by research. Wood is still produced by
   gather but consumed by nothing — likely role for future buildings system
   or a second research currency tier. Revisit when buildings come up.
+
+### Numbers snapshot (PR #6 — Hero leveling)
+
+- Level cap: 30 at v1. Future research raises it (backlog node "Hero Max
+  Level"). XP banked past the cap is consumed on the next cap raise.
+- XP curve: `xp_to_next(L) = floor(100 * L^1.5)`. Lv1→2 = 100, Lv29→30 ≈
+  15.6k. Total Lv1→30 ≈ 150k XP.
+- Stats per level (additive):
+  - +5% effective ATK over the rarity baseline.
+  - +2% hero march-speed bonus (stacks on top of research).
+- Rarity baseline ATK: mythic 500 · legendary 300 · epic 200 · rare 120
+  · uncommon 70 · common 40. Derived from rarity until per-hero stats
+  land — heroes.json doesn't carry `atk_base` yet.
+- Excess shards (`hero_shards.count` ≥ 100) still flow into
+  `owned_heroes.dupes_pending`; consuming dupes for direct level-ups
+  stays in the backlog ("Hero level-up" → shard sinks).
 
 ### Medium term
 - **Gather refactor — troops as gatherers.** Description in-game:

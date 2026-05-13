@@ -244,6 +244,7 @@ def _row(**overrides) -> _Row:
         "terrain": "forest",
         "image_url": None,
         "level": 1,
+        "xp": 0,
         "dupes_pending": 0,
         "element": None,
         "release_date": "2026-02",

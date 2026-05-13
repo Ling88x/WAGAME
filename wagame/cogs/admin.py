@@ -12,6 +12,7 @@ from discord.ext import commands
 
 from wagame.cogs.heroes import _autocomplete_hero
 from wagame.db import Database
+from wagame.game.hero_levels import apply_xp_gain
 
 
 async def _is_bot_owner(interaction: discord.Interaction) -> bool:
@@ -134,6 +135,83 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
 
     @grant_hero.autocomplete("hero")
     async def grant_hero_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        return await _autocomplete_hero(self.db, current)
+
+    @app_commands.command(
+        name="grant-hero-xp",
+        description="Grant XP to a player's hero (owner only).",
+    )
+    @app_commands.describe(
+        hero="Hero name (must be owned by the recipient).",
+        amount="XP to add (>= 1).",
+        user="Recipient. Defaults to you.",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def grant_hero_xp(
+        self,
+        interaction: discord.Interaction,
+        hero: str,
+        amount: int,
+        user: discord.User | None = None,
+    ) -> None:
+        target = user or interaction.user
+        if amount < 1:
+            await interaction.response.send_message(
+                "Amount must be >= 1.", ephemeral=True
+            )
+            return
+
+        needle = hero.strip().lower()
+        async with self.db.conn.execute(
+            "SELECT id, name FROM heroes WHERE LOWER(name) = ?", (needle,)
+        ) as cur:
+            hero_row = await cur.fetchone()
+        if hero_row is None:
+            async with self.db.conn.execute(
+                "SELECT id, name FROM heroes WHERE codename = ?", (needle,)
+            ) as cur:
+                hero_row = await cur.fetchone()
+        if hero_row is None:
+            await interaction.response.send_message(
+                f"No hero matches `{hero}`.", ephemeral=True
+            )
+            return
+
+        await self.db.get_or_create_player(target.id)
+        async with self.db.conn.execute(
+            "SELECT level, xp FROM owned_heroes "
+            "WHERE discord_user_id = ? AND hero_id = ?",
+            (target.id, hero_row["id"]),
+        ) as cur:
+            owned = await cur.fetchone()
+        if owned is None:
+            await interaction.response.send_message(
+                f"{target.mention} doesn't own **{hero_row['name']}**. "
+                "Grant the hero first with `/admin grant-hero`.",
+                ephemeral=True,
+            )
+            return
+
+        result = apply_xp_gain(owned["level"], owned["xp"], amount)
+        await self.db.conn.execute(
+            "UPDATE owned_heroes SET level = ?, xp = ? "
+            "WHERE discord_user_id = ? AND hero_id = ?",
+            (result.new_level, result.new_xp, target.id, hero_row["id"]),
+        )
+        await self.db.conn.commit()
+
+        msg = (
+            f"**{hero_row['name']}** +{amount:,} XP → "
+            f"Lv {result.new_level} ({result.new_xp:,} XP)"
+        )
+        if result.levels_gained > 0:
+            msg += f" · gained {result.levels_gained} level(s)"
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    @grant_hero_xp.autocomplete("hero")
+    async def grant_hero_xp_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         return await _autocomplete_hero(self.db, current)
