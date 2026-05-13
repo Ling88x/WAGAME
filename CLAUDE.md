@@ -22,6 +22,8 @@ from here, and do not duplicate its features.
 - Official help / wiki: https://athinkingape.helpshift.com/hc/en/7-witch-arcana---magic-school/
 - Hero database (community, comprehensive — names, rarity, element, terrain
   affinity, bonuses, lore): https://kohqs.com/wa/heroes
+- In-game vocabulary cheat-sheet (user-provided): `docs/glossary.md` —
+  read this if anything in chat reads like jargon (TBs, DTH, OC, RSS, etc.).
 
 Use `WebFetch` on specific pages when you need official names, mechanics,
 hero rosters, or balance data. **Do not invent game lore.** When the wiki is
