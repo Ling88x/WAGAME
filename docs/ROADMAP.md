@@ -17,7 +17,7 @@ edit as a discussion with the user.
 | #4 | Summoning Gate    | ✅ shipped | Troop training, 1 queue, food-only cost, T1 only at start (research unlocks T2–T4) |
 | #5 | Research tree     | ✅ shipped | 8 nodes across Economy / Military / Logistics, 1 slot, gold-only cost, auto-apply on completion |
 | #6 | Hero leveling     | ✅ shipped | XP curve `100×L^1.5`, +5% ATK / +2% march-speed per level, cap 30 (banked XP at cap), `/admin grant-hero-xp` |
-| #7 | Hunt (`/hunt`)    | ⏳ pending | 12-level tenebrals, energy cap 500 / regen 1pt-30s, faux-timer 30–90s march, RSS + Hero XP drop, daily quota |
+| #7 | Hunt (`/hunt`)    | ✅ shipped | 12-level tenebrals (HP 750 → 100B), energy cap 500 / regen 1pt-30s, faux-timer 15–90s, persistent mob HP, daily quota 10 kills |
 | #8 | Gather refactor   | ⏳ pending | Add hero slot, march time tied to hero march_speed_pct + research |
 | #9 | Combat            | ⏳ pending | Auto-battler loosely based on in-game WA; element triangle TBD; troops + commander hero per side |
 | #10 | Raids            | ⏳ pending | Solo PvE first (R1–R6 → void vesps → dominion boss). Energy gated. PvP raids later |
@@ -146,6 +146,29 @@ When the relevant PR comes up, raise the item and ask whether to fold it in.
 - Excess shards (`hero_shards.count` ≥ 100) still flow into
   `owned_heroes.dupes_pending`; consuming dupes for direct level-ups
   stays in the backlog ("Hero level-up" → shard sinks).
+
+### Numbers snapshot (PR #7 — Tenebral Hunt)
+
+- 12 levels copied 1:1 from `docs/tenebral-data.md` (HP 750 → 100B, energy
+  25 → 139). Default players one-shot lv1, grind lv2–3 for weeks, lv6+
+  is gated on stacked research + hero levels.
+- Energy: cap 500, regen 1pt / 30s (lazy formula on
+  `players.energy_updated_at`). Full pool refills in ~4h 10m.
+- March power: `(hero_atk + Σ troop.atk × count) × (1 + troop_attack_pct)`.
+  Auto-fills with every owned troop — no per-stack slider yet.
+- Min-power gate per level = `tenebral.hp / 200` (worst case ~200 hits).
+  Attack disabled below the gate.
+- Damage roll: deterministic in v1 (no crit / variance) — RNG layer in
+  the balance pass.
+- Faux-timer: `base × (1 − hero_march_speed − research_march_speed)`,
+  clamped to [15s, 90s].
+- Mob spawns persist between attacks (`tenebral_spawns`); kill despawns
+  + awards RSS (split evenly across gold/food/wood) + Hero XP to the
+  march hero (cascades through `apply_xp_gain`).
+- Daily quota: 10 kills, reset 21:00 UTC, reward 50 gems + 100k each of
+  gold/food/wood. Tracked in `hunt_daily_progress` keyed on reset day.
+- Resilience: `cog_load` drains any unresolved `hunt_marches` from a
+  prior boot so energy never silently burns.
 
 ### Medium term
 - **Gather refactor — troops as gatherers.** Description in-game:
