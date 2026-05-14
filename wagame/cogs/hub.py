@@ -251,7 +251,7 @@ class BackToHubButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         embed = await render_hub_embed(self.db, interaction.user)
         view = HubView(self.db, self.owner_id)
-        await interaction.response.edit_message(embed=embed, view=view, embeds=[])
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class _BackOnlyView(discord.ui.View):
@@ -300,7 +300,7 @@ class HubView(discord.ui.View):
         embed = await _render_embed(
             self.db, interaction.user, view.selected_level, view.selected_hero_id
         )
-        await interaction.response.edit_message(embed=embed, view=view, embeds=[])
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Gather", emoji="⛏️", style=discord.ButtonStyle.primary, row=0)
     async def open_gather(
@@ -310,7 +310,7 @@ class HubView(discord.ui.View):
         view = GatherView(self.db, self.owner_id)
         view.add_item(self._back())
         embed = await _render_embed(self.db, interaction.user)
-        await interaction.response.edit_message(embed=embed, view=view, embeds=[])
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Research", emoji="🔬", style=discord.ButtonStyle.primary, row=0)
     async def open_research(
@@ -322,7 +322,7 @@ class HubView(discord.ui.View):
         embed = await _render_embed(
             self.db, interaction.user, view.selected_codename
         )
-        await interaction.response.edit_message(embed=embed, view=view, embeds=[])
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Train", emoji="🏰", style=discord.ButtonStyle.primary, row=0)
     async def open_train(
@@ -343,7 +343,7 @@ class HubView(discord.ui.View):
         embed = await _render_embed(
             self.db, interaction.user, view.selected_codename
         )
-        await interaction.response.edit_message(embed=embed, view=view, embeds=[])
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Heroes", emoji="🎴", style=discord.ButtonStyle.secondary, row=1)
     async def open_heroes(
@@ -362,7 +362,7 @@ class HubView(discord.ui.View):
     ) -> None:
         embed = await _render_summon_picker_embed(self.db, interaction.user)
         view = _BackOnlyView(self.db, self.owner_id)
-        await interaction.response.edit_message(embed=embed, view=view, embeds=[])
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Profile", emoji="👤", style=discord.ButtonStyle.secondary, row=1)
     async def open_profile(
@@ -372,14 +372,14 @@ class HubView(discord.ui.View):
         player = await self.db.get_or_create_player(self.owner_id)
         embed = _profile_embed(interaction.user, player)
         view = _BackOnlyView(self.db, self.owner_id)
-        await interaction.response.edit_message(embed=embed, view=view, embeds=[])
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, row=1)
     async def refresh(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
         embed = await render_hub_embed(self.db, interaction.user)
-        await interaction.response.edit_message(embed=embed, view=self, embeds=[])
+        await interaction.response.edit_message(embed=embed, view=self)
 
 
 # -- cog ------------------------------------------------------------------
