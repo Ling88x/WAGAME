@@ -165,8 +165,15 @@ async def _start_gather(
     return Flash.ok(f"Sent a march to gather {resource}.")
 
 
-async def _claim_ready(db: Database, user_id: int) -> tuple[int, dict[Resource, int], int]:
-    """Claim every finished march. Returns (count, totals_by_resource, crits)."""
+async def _claim_ready(
+    db: Database, user_id: int
+) -> tuple[int, dict[Resource, int], int, list[tuple[int | None, Resource, int]]]:
+    """Claim every finished march.
+
+    Returns `(count, totals_by_resource, crits, per_march)` where `per_march`
+    is a list of `(hero_id, resource, amount_with_crit)` rows — caller uses
+    that to fire one diary DM per hero that returned home.
+    """
     now = int(time.time())
     async with db.conn.execute(
         "SELECT * FROM marches WHERE discord_user_id = ? AND finishes_at <= ?",
@@ -175,11 +182,12 @@ async def _claim_ready(db: Database, user_id: int) -> tuple[int, dict[Resource, 
         rows = await cur.fetchall()
 
     if not rows:
-        return 0, {}, 0
+        return 0, {}, 0, []
 
     totals: dict[Resource, int] = {"gold": 0, "food": 0, "wood": 0}
     crits = 0
     ids: list[int] = []
+    per_march: list[tuple[int | None, Resource, int]] = []
     for row in rows:
         resource: Resource = row["resource"]
         crit = bool(row["crit"])
@@ -188,6 +196,8 @@ async def _claim_ready(db: Database, user_id: int) -> tuple[int, dict[Resource, 
         if crit:
             crits += 1
         ids.append(int(row["id"]))
+        hero_id = int(row["hero_id"]) if row["hero_id"] is not None else None
+        per_march.append((hero_id, resource, amount))
 
     await db.conn.execute(
         """
@@ -202,7 +212,7 @@ async def _claim_ready(db: Database, user_id: int) -> tuple[int, dict[Resource, 
     placeholders = ",".join("?" * len(ids))
     await db.conn.execute(f"DELETE FROM marches WHERE id IN ({placeholders})", ids)
     await db.conn.commit()
-    return len(rows), totals, crits
+    return len(rows), totals, crits, per_march
 
 
 # -- rendering --------------------------------------------------------------
@@ -375,7 +385,9 @@ class GatherView(discord.ui.View):
 
     @discord.ui.button(label="Claim Ready", emoji="📦", style=discord.ButtonStyle.success, row=1)
     async def claim(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        count, totals, crits = await _claim_ready(self.db, interaction.user.id)
+        count, totals, crits, per_march = await _claim_ready(
+            self.db, interaction.user.id
+        )
         if count == 0:
             await self._refresh(interaction, flash=Flash.info("Nothing finished yet."))
             return
@@ -384,6 +396,18 @@ class GatherView(discord.ui.View):
         if crits:
             msg += f" — {crits} crit{'s' if crits > 1 else ''}! ✨"
         await self._refresh(interaction, flash=Flash.ok(msg))
+
+        # Per-hero diary DMs after the panel refreshes.
+        from wagame.cogs.diary import try_send_diary
+        for hero_id, resource, amount in per_march:
+            await try_send_diary(
+                interaction.client,  # type: ignore[arg-type]
+                self.db,
+                user_id=interaction.user.id,
+                hero_id=hero_id,
+                event="gather_claim",
+                context={"rss": f"{amount:,} {resource}"},
+            )
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, row=1)
     async def refresh(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:

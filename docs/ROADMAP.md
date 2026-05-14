@@ -21,6 +21,7 @@ edit as a discussion with the user.
 | #8 | Hub (`/wa`)       | ✅ shipped | Single panel with status lines per subsystem + button-per-subpanel navigation, Back-to-Hub injected externally |
 | #9 | Admin hub         | ✅ shipped | `/admin hub` + Admin button in `/wa`. Eight action modals (grant, hero, XP, tier, queue, train speed, research, reset). Starter Vivienne grant on every player. |
 | #10 | Gather refactor  | ✅ shipped | Hero slot per gather march, hero locked while in flight, duration shortened by hero march_speed_pct + research speed (clamped 80%). |
+| #11 | Hero Diary       | ✅ shipped | Heroes DM the player after kills, chips, claims, and level-ups. Scripted corpus (`data/diary_lines.json`), 1h per-hero throttle, opt-out via `/settings diary`. |
 | #11 | Combat           | ⏳ pending | Auto-battler loosely based on in-game WA; element triangle TBD; troops + commander hero per side |
 | #12 | Raids            | ⏳ pending | Solo PvE first (R1–R6 → void vesps → dominion boss). Energy gated. PvP raids later |
 | #13 | Daily / progression | ⏳ pending | Login rewards, streaks, account-wide XP — defer until PvE feels good |

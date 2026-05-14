@@ -207,7 +207,7 @@ async def test_claim_ready_credits_resources_and_clears_rows(db: Database) -> No
     )
     await db.conn.commit()
 
-    count, totals, crits = await _claim_ready(db, 3)
+    count, totals, crits, _ = await _claim_ready(db, 3)
     assert count == 1
     assert totals["gold"] == 500
     assert crits == 0
@@ -236,7 +236,7 @@ async def test_claim_ready_applies_crit_multiplier(db: Database) -> None:
     )
     await db.conn.commit()
 
-    count, totals, crits = await _claim_ready(db, 4)
+    count, totals, crits, _ = await _claim_ready(db, 4)
     assert count == 1
     assert crits == 1
     assert totals["wood"] == 700 * CRIT_MULTIPLIER
@@ -254,7 +254,7 @@ async def test_claim_ready_skips_unfinished_rows(db: Database) -> None:
     )
     await db.conn.commit()
 
-    count, totals, crits = await _claim_ready(db, 5)
+    count, totals, crits, _ = await _claim_ready(db, 5)
     assert count == 0
     assert totals == {}
     assert crits == 0

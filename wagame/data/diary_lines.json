@@ -1,0 +1,46 @@
+{
+  "hunt_kill": [
+    "{mob} (Lv{level}) is down. Took longer than I expected — the Forest grew dim around the last strike. Bringing back what I could carry.",
+    "Slain {mob} on the {level}th rung. I keep dreaming of the way they fall, like leaves that knew the wind was coming.",
+    "{mob} fell at dawn. There was a glow under the roots when I left. I'll go deeper next time, if you'll send me.",
+    "{mob} (Lv{level}) won't trouble the road again. I noticed a second pair of eyes in the brush — I'll bring a bow next time.",
+    "Done. {mob} burst into ash like wet paper. Felt wrong this time, like the Tenebral didn't *want* to fight.",
+    "{mob} dispatched. Found a torn cloak near the kill — embroidered with a sigil I don't recognise. Saving it for the Almanac.",
+    "{mob} (Lv{level}): finished. The treetops were singing. I'm not sure that's normal.",
+    "Cleanly done. {mob} dropped a coin that wasn't ours. Older than the city, older than Witch Arcana proper. Bringing it home.",
+    "{mob} slain. The shadow it cast lingered after the body fell. We should ask the Council about that someday.",
+    "{mob} (Lv{level}) dead. There's a path opening east of the kill site — it wasn't there yesterday. Want to scout it?"
+  ],
+  "hunt_chip": [
+    "{mob} (Lv{level}) is wounded but still standing. I'll need another sortie. Rest your blade hand for me.",
+    "Chipped {mob} for what I could. It looked at me funny on the way back — like it remembered.",
+    "Couldn't finish {mob} this time. It bled black, not red. I'll need to think on that.",
+    "{mob} (Lv{level}) staggered but rallied. Going to need more troops, or a sharper plan. Or both.",
+    "Half-done with {mob}. Saw a faint trail of ash heading deeper into the Forest after I struck — like a wounded thing fleeing.",
+    "{mob} took the blow but didn't fall. Forest air smells different up close — colder, somehow.",
+    "Still alive: {mob} (Lv{level}). It almost felt like it was *waiting* between my swings.",
+    "Wounded {mob} and pulled back. The march road home was quieter than usual. Bad sign or good — I can't tell."
+  ],
+  "gather_claim": [
+    "Brought the haul home. Saw an empty campfire half a league out, still warm. No tracks. Strange.",
+    "Carry's full. The deeper I went, the louder the trees got. One of them whispered my name — I'm sure of it.",
+    "Loaded the cart. Crossed a circle of stones I haven't seen before. Marked the location.",
+    "Gather done. There's a child's lantern hanging in the canopy ten minutes south of the road. No child.",
+    "Back with the goods. The wind shifted right when I left — I think the Forest knows when we visit twice in a day.",
+    "Loaded up. Heard a melody from beyond the treeline — three notes, repeating. I'll write them down so we don't forget.",
+    "Gather complete. The river ran black for a heartbeat as I crossed it. Then clear again, like nothing happened.",
+    "Cargo secured. Saw a fox with two tails near the cache. It blinked twice and was gone.",
+    "Resources home safe. Felt a hand on my shoulder when I stopped to rest. Nobody was there.",
+    "Done gathering. I left a knot of yarn tied to a low branch — if it's still there next trip, the path is safe."
+  ],
+  "level_up": [
+    "I feel it. Something settled into place when the last strike landed. I'm stronger now — say where to point me.",
+    "A page turned. My grip is steadier, my step is longer. Whatever you wanted me to become — closer.",
+    "The Tenebrals will notice the difference next time. I can feel the new strength humming in my bones.",
+    "Levelled. Tonight I dreamed of a tower with no top. I think one of us is going to climb it.",
+    "Sharper now. My old scars feel further away. Thank you — I mean it. We're getting somewhere.",
+    "Something snapped into focus mid-fight. I won't waste it. Send me back out when you're ready.",
+    "I felt my reflection change when I drank from the stream after the battle. Not bad change. Just... more.",
+    "Levelled up. The wind keeps catching my cloak from behind, like it wants me to move forward. Lead on."
+  ]
+}
