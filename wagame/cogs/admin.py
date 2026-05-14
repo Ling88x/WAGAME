@@ -401,6 +401,37 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
             embed=embed, view=view, ephemeral=True
         )
 
+    @app_commands.command(
+        name="spawn-sighting",
+        description="Force-spawn a Tenebral Sighting (owner only).",
+    )
+    @app_commands.describe(
+        level="Tenebral level (1-12).",
+        user="Target player. Defaults to you.",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def spawn_sighting(
+        self,
+        interaction: discord.Interaction,
+        level: int,
+        user: discord.User | None = None,
+    ) -> None:
+        from wagame.cogs.sightings import spawn_sighting
+        target = user or interaction.user
+        if level < 1 or level > 12:
+            await interaction.response.send_message(
+                "Level must be 1-12.", ephemeral=True
+            )
+            return
+        await self.db.get_or_create_player(target.id)
+        sighting_id = await spawn_sighting(
+            self.db, target.id, hunt_level_unlocked=level, forced_level=level
+        )
+        await interaction.response.send_message(
+            f"Spawned sighting #{sighting_id} (Lv{level}) for {target.mention}.",
+            ephemeral=True,
+        )
+
 
 # -- admin hub: render + modals + view ------------------------------------
 

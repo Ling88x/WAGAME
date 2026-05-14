@@ -86,6 +86,14 @@ async def _hub_state(db: Database, user_id: int) -> dict:
     ) as cur:
         heroes_row = await cur.fetchone()
 
+    async with db.conn.execute(
+        "SELECT * FROM tenebral_sightings "
+        "WHERE discord_user_id = ? AND claimed = 0 "
+        "ORDER BY spawned_at DESC LIMIT 1",
+        (user_id,),
+    ) as cur:
+        sighting = await cur.fetchone()
+
     return {
         "player": player,
         "energy": energy,
@@ -98,6 +106,7 @@ async def _hub_state(db: Database, user_id: int) -> dict:
         "daily_kills": int(daily["kills"]) if daily else 0,
         "daily_claimed": bool(daily["reward_claimed"]) if daily else False,
         "heroes_count": int(heroes_row["n"] or 0),
+        "sighting": sighting,
     }
 
 
@@ -164,6 +173,20 @@ def _quota_line(state: dict) -> str:
     return f"{kills}/{DAILY_QUOTA_KILLS} kills"
 
 
+def _sighting_line(state: dict) -> str | None:
+    """Active Tenebral Sighting summary line, or None when no sighting."""
+    row = state["sighting"]
+    if row is None:
+        return None
+    spec = get_tenebral(int(row["level"]))
+    return (
+        f"🌙 **Lv{spec.level} {spec.name}** spotted! "
+        f"Expires <t:{int(row['expires_at'])}:R>. "
+        f"Reward: +{int(row['bonus_rss']):,} RSS · "
+        f"+{int(row['bonus_shard_count'])}x shards"
+    )
+
+
 # -- rendering ------------------------------------------------------------
 
 
@@ -181,6 +204,10 @@ async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embe
         f"🌲 {int(player['wood']):,}  ·  💎 {int(player['gems']):,}\n"
         f"⚡ Energy {state['energy']}/{ENERGY_CAP}"
     )
+
+    sighting_line = _sighting_line(state)
+    if sighting_line:
+        embed.add_field(name="🌙 Sighting", value=sighting_line, inline=False)
 
     embed.add_field(name="🦌 Hunt", value=_hunt_line(state), inline=False)
     embed.add_field(name="⛏️ Gathering", value=_gather_line(state), inline=False)
@@ -387,6 +414,36 @@ class HubView(discord.ui.View):
     ) -> None:
         embed = await render_hub_embed(self.db, interaction.user)
         await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Sighting", emoji="🌙", style=discord.ButtonStyle.secondary, row=2)
+    async def open_sighting(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        from wagame.cogs.sightings import (
+            SightingView,
+            _active_sighting,
+            _panel_embed,
+        )
+        row = await _active_sighting(self.db, self.owner_id)
+        if row is None:
+            embed = discord.Embed(
+                title="🌙 No active sighting",
+                description=(
+                    "Sightings appear at random (6-24h apart). When one fires "
+                    "you'll get a DM."
+                ),
+                color=NEUTRAL_COLOR,
+            )
+            view = _BackOnlyView(self.db, self.owner_id)
+            await interaction.response.edit_message(embed=embed, view=view)
+            return
+        view = SightingView(self.db, self.owner_id, int(row["id"]))
+        await view.initialize()
+        view.add_item(self._back())
+        embed = await _panel_embed(
+            self.db, interaction.user, row, view.selected_hero_id
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Admin", emoji="🛠", style=discord.ButtonStyle.danger, row=2)
     async def open_admin(
