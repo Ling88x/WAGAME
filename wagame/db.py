@@ -69,6 +69,16 @@ class Database:
             "UPDATE players SET last_seen = datetime('now') WHERE discord_user_id = ?",
             (discord_user_id,),
         )
+        # Starter hero — Vivienne ("vivi"). Idempotent: the (player, hero)
+        # primary key on owned_heroes makes repeat inserts a no-op, so we
+        # backfill existing players for free on their next interaction
+        # without needing a one-shot migration. Falls through silently if
+        # the heroes table hasn't been synced yet (fresh install).
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO owned_heroes (discord_user_id, hero_id, level) "
+            "SELECT ?, id, 1 FROM heroes WHERE codename = 'vivi'",
+            (discord_user_id,),
+        )
         await self.conn.commit()
 
         # Daily +100 gems is auto-collected on the first interaction past

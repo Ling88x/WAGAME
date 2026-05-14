@@ -249,8 +249,9 @@ class BackToHubButton(discord.ui.Button):
         self.owner_id = owner_id
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        is_admin = await interaction.client.is_owner(interaction.user)
         embed = await render_hub_embed(self.db, interaction.user)
-        view = HubView(self.db, self.owner_id)
+        view = HubView(self.db, self.owner_id, is_admin=is_admin)
         await interaction.response.edit_message(embed=embed, view=view)
 
 
@@ -273,10 +274,15 @@ class _BackOnlyView(discord.ui.View):
 
 
 class HubView(discord.ui.View):
-    def __init__(self, db: Database, owner_id: int) -> None:
+    def __init__(self, db: Database, owner_id: int, is_admin: bool = False) -> None:
         super().__init__(timeout=15 * 60)
         self.db = db
         self.owner_id = owner_id
+        self.is_admin = is_admin
+        if not is_admin:
+            # The Admin button is declared statically below; strip it for
+            # non-owners so it doesn't show up in the panel at all.
+            self.remove_item(self.open_admin)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -381,6 +387,21 @@ class HubView(discord.ui.View):
         embed = await render_hub_embed(self.db, interaction.user)
         await interaction.response.edit_message(embed=embed, view=self)
 
+    @discord.ui.button(label="Admin", emoji="🛠", style=discord.ButtonStyle.danger, row=2)
+    async def open_admin(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        if not await interaction.client.is_owner(interaction.user):
+            await interaction.response.send_message(
+                "Owner only.", ephemeral=True
+            )
+            return
+        from wagame.cogs.admin import AdminHubView, render_admin_hub_embed
+        view = AdminHubView(self.db, self.owner_id)
+        view.add_item(self._back())
+        embed = render_admin_hub_embed()
+        await interaction.response.edit_message(embed=embed, view=view)
+
 
 # -- cog ------------------------------------------------------------------
 
@@ -396,7 +417,8 @@ class HubCog(commands.Cog):
     @app_commands.command(name="wa", description="Open your Witch Arcana hub.")
     async def wa(self, interaction: discord.Interaction) -> None:
         await self.db.get_or_create_player(interaction.user.id)
-        view = HubView(self.db, interaction.user.id)
+        is_admin = await interaction.client.is_owner(interaction.user)
+        view = HubView(self.db, interaction.user.id, is_admin=is_admin)
         embed = await render_hub_embed(self.db, interaction.user)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 

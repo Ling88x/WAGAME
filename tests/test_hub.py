@@ -43,7 +43,8 @@ async def test_hub_state_for_new_player_is_all_idle(db: Database) -> None:
     assert state["train_job"] is None
     assert state["hunt_march"] is None
     assert state["daily_kills"] == 0
-    assert state["heroes_count"] == 0
+    # Players auto-receive Vivienne (codename `vivi`) as a starter hero.
+    assert state["heroes_count"] == 1
     assert _gather_line(state) == "Idle"
     assert _research_line(state) == "Idle"
     assert _train_line(state) == "Idle"
@@ -197,4 +198,5 @@ async def test_hub_state_counts_owned_heroes(db: Database) -> None:
     )
     await db.conn.commit()
     state = await _hub_state(db, 1)
-    assert state["heroes_count"] == 1
+    # Starter Vivienne + the granted ghostpink.
+    assert state["heroes_count"] == 2
