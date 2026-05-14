@@ -94,6 +94,14 @@ async def _hub_state(db: Database, user_id: int) -> dict:
     ) as cur:
         sighting = await cur.fetchone()
 
+    async with db.conn.execute(
+        "SELECT COUNT(*) AS n FROM bestiary_entries "
+        "WHERE discord_user_id = ? AND mob_kind = 'tenebral' "
+        "AND encounter_count > 0",
+        (user_id,),
+    ) as cur:
+        bestiary_row = await cur.fetchone()
+
     return {
         "player": player,
         "energy": energy,
@@ -107,6 +115,7 @@ async def _hub_state(db: Database, user_id: int) -> dict:
         "daily_claimed": bool(daily["reward_claimed"]) if daily else False,
         "heroes_count": int(heroes_row["n"] or 0),
         "sighting": sighting,
+        "bestiary_documented": int(bestiary_row["n"] or 0),
     }
 
 
@@ -217,6 +226,11 @@ async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embe
     embed.add_field(
         name="🎴 Heroes",
         value=f"{state['heroes_count']} owned",
+        inline=True,
+    )
+    embed.add_field(
+        name="📜 Bestiary",
+        value=f"{state['bestiary_documented']}/12 tenebrals documented",
         inline=True,
     )
     return embed
@@ -414,6 +428,16 @@ class HubView(discord.ui.View):
     ) -> None:
         embed = await render_hub_embed(self.db, interaction.user)
         await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Bestiary", emoji="📜", style=discord.ButtonStyle.secondary, row=2)
+    async def open_bestiary(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        from wagame.cogs.bestiary import BestiaryView, render_embed
+        view = BestiaryView(self.db, self.owner_id)
+        view.add_item(self._back())
+        embed = await render_embed(self.db, interaction.user)
+        await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Sighting", emoji="🌙", style=discord.ButtonStyle.secondary, row=2)
     async def open_sighting(

@@ -233,6 +233,17 @@ async def _engage_sighting(
         )
     await db.conn.commit()
 
+    # Bestiary: sighting attacks feed the same per-(kind, level) log as
+    # regular hunts so the player's tenebral tally is unified.
+    from wagame.cogs.bestiary import record_encounter
+    await record_encounter(
+        db,
+        user_id=user_id,
+        mob_kind="tenebral",
+        mob_level=int(row["level"]),
+        killed=killed,
+    )
+
     if killed:
         bits = [f"Slain **{spec.name} (Lv{int(row['level'])})**!"]
         bits.append(f"+{summary['bonus_rss']:,} RSS (split).")

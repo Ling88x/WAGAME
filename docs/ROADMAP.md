@@ -23,6 +23,7 @@ edit as a discussion with the user.
 | #10 | Gather refactor  | ✅ shipped | Hero slot per gather march, hero locked while in flight, duration shortened by hero march_speed_pct + research speed (clamped 80%). |
 | #11 | Hero Diary       | ✅ shipped | Heroes DM the player after kills, chips, claims, and level-ups. Scripted corpus (`data/diary_lines.json`), 1h per-hero throttle, opt-out via `/settings diary`. |
 | #12 | Sightings        | ✅ shipped | Random rare-mob spawns delivered by DM (6-24h gap per player). 2h engagement window, 3× RSS/XP rewards + 1-5 random hero shards. `/sighting` panel and hub Sighting button. `/admin spawn-sighting` for testing. |
+| #13 | Bestiary         | ✅ shipped | Per-player log of every tenebral encountered or slain. `/bestiary` panel + hub button + completion line in `/wa`. Counters bumped by every hunt/sighting engage; locked slots show as "???". |
 | #11 | Combat           | ⏳ pending | Auto-battler loosely based on in-game WA; element triangle TBD; troops + commander hero per side |
 | #12 | Raids            | ⏳ pending | Solo PvE first (R1–R6 → void vesps → dominion boss). Energy gated. PvP raids later |
 | #13 | Daily / progression | ⏳ pending | Login rewards, streaks, account-wide XP — defer until PvE feels good |

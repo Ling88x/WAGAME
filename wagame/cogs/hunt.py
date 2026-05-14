@@ -308,6 +308,16 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
     )
     await db.conn.commit()
 
+    # Bestiary: every engagement counts as an encounter; kills bump slain.
+    from wagame.cogs.bestiary import record_encounter
+    await record_encounter(
+        db,
+        user_id=user_id,
+        mob_kind="tenebral",
+        mob_level=level,
+        killed=killed,
+    )
+
     if killed:
         flash = Flash.ok(
             f"Slain **{spec.name} (Lv{level})**! +{damage:,} dmg final blow."
