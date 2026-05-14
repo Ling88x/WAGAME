@@ -58,6 +58,26 @@ def roll_gather(resource: Resource, rng: random.Random | None = None) -> GatherR
     return GatherRoll(resource=resource, base=base, crit=crit)
 
 
+def scaled_gather_duration(
+    base_seconds: int,
+    hero_march_speed_pct: int = 0,
+    research_speed_pct: int = 0,
+) -> int:
+    """Apply hero + research speed bonuses to a gather duration.
+
+    Bonuses stack additively; combined reduction capped at 80% so a
+    gather never falls below 20% of its base time. Floors at 60 s so
+    even a fully-buffed gather still takes a minute to feel like a
+    march instead of a click.
+    """
+    if base_seconds <= 0:
+        raise ValueError("base_seconds must be > 0")
+    total = max(0, hero_march_speed_pct) + max(0, research_speed_pct)
+    reduction = min(80, total)
+    scaled = int(base_seconds * (100 - reduction) / 100)
+    return max(60, scaled)
+
+
 def remaining_seconds(finishes_at: int, now: int) -> int:
     return max(0, finishes_at - now)
 

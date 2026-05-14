@@ -314,6 +314,7 @@ class HubView(discord.ui.View):
     ) -> None:
         from wagame.cogs.gather import GatherView, _render_embed
         view = GatherView(self.db, self.owner_id)
+        await view.initialize()
         view.add_item(self._back())
         embed = await _render_embed(self.db, interaction.user)
         await interaction.response.edit_message(embed=embed, view=view)

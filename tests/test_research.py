@@ -26,6 +26,10 @@ async def db(tmp_path: Path) -> Database:
     database = Database(tmp_path / "research.db")
     await database.connect()
     await database.migrate()
+    # PR #10: starter hero grant inside get_or_create_player needs the
+    # heroes catalog populated.
+    from wagame.heroes_data import sync_heroes
+    await sync_heroes(database)
     yield database
     await database.close()
 
@@ -278,18 +282,28 @@ async def test_claim_skips_unfinished_job(db: Database) -> None:
 # -- gather bonuses ---------------------------------------------------------
 
 
+async def _vivi_id(db: Database) -> int:
+    async with db.conn.execute(
+        "SELECT id FROM heroes WHERE codename = 'vivi'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    return int(row["id"])
+
+
 async def test_gather_yield_pct_is_applied_at_start(db: Database) -> None:
     from wagame.cogs.gather import _start_gather
 
     user_id = 11
     await db.get_or_create_player(user_id)
+    hero_id = await _vivi_id(db)
     # Make yield perfectly deterministic: 100% bonus -> base x2.
     await db.conn.execute(
         "UPDATE players SET gather_yield_pct = 100 WHERE discord_user_id = ?", (user_id,)
     )
     await db.conn.commit()
 
-    result = await _start_gather(db, user_id, "food")
+    result = await _start_gather(db, user_id, "food", hero_id)
     assert result.outcome == Outcome.SUCCESS
 
     async with db.conn.execute(
@@ -307,13 +321,14 @@ async def test_gather_speed_pct_shortens_duration(db: Database) -> None:
 
     user_id = 12
     await db.get_or_create_player(user_id)
-    # 50% speed: duration halved.
+    hero_id = await _vivi_id(db)
+    # 50% speed: duration halved. Hero is Lv1, march_speed_pct contributes 0.
     await db.conn.execute(
         "UPDATE players SET gather_speed_pct = 50 WHERE discord_user_id = ?", (user_id,)
     )
     await db.conn.commit()
 
-    result = await _start_gather(db, user_id, "wood")
+    result = await _start_gather(db, user_id, "wood", hero_id)
     assert result.outcome == Outcome.SUCCESS
 
     async with db.conn.execute(
@@ -323,5 +338,5 @@ async def test_gather_speed_pct_shortens_duration(db: Database) -> None:
         row = await cur.fetchone()
     assert row is not None
     duration = int(row["finishes_at"]) - int(row["started_at"])
-    # Half of 1800s = 900s; allow a few seconds of leeway for rounding.
+    # Half of 1800s = 900s.
     assert duration == GATHER_DURATION_SECONDS // 2

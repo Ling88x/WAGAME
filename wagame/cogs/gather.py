@@ -1,12 +1,13 @@
 """/gather — start timed gathers and claim resources via an ephemeral panel.
 
-Single slash command. The response is an ephemeral embed with five buttons
-(Gold / Food / Wood / Claim Ready / Refresh) that edits itself in place.
-Slots have no identity — capacity is just the cap on concurrent rows in
-`marches`. Re-running `/gather` issues a fresh panel; ephemeral interaction
-tokens last ~15 minutes, after which buttons stop working and the player
-calls `/gather` again. We don't register persistent views — there is no
-shared channel surface to restore on restart.
+Each gather rides a commander hero (PR #10). The hero is locked for the
+duration of the march: it can't be picked for another `/gather` or
+`/hunt` until the row is claimed and removed. Hero `march_speed_pct`
+shortens the gather duration on top of any research speed bonus.
+
+Persistent UI shape unchanged: single ephemeral embed + buttons + a
+hero Select. Buttons edit in place; `/gather` re-opened spawns a fresh
+panel.
 """
 
 from __future__ import annotations
@@ -24,7 +25,9 @@ from wagame.game.gather import (
     Resource,
     is_finished,
     roll_gather,
+    scaled_gather_duration,
 )
+from wagame.game.hero_levels import march_speed_pct
 from wagame.ui import Flash, apply_flash
 
 RESOURCE_EMOJI: dict[str, str] = {"gold": "💰", "food": "🍞", "wood": "🌲"}
@@ -41,8 +44,9 @@ class GatherCog(commands.Cog):
     @app_commands.command(name="gather", description="Open your gathering panel.")
     async def gather(self, interaction: discord.Interaction) -> None:
         await self.db.get_or_create_player(interaction.user.id)
-        embed = await _render_embed(self.db, interaction.user)
         view = GatherView(self.db, interaction.user.id)
+        await view.initialize()
+        embed = await _render_embed(self.db, interaction.user)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
@@ -58,13 +62,58 @@ async def _fetch_player(db: Database, user_id: int):
 
 async def _fetch_marches(db: Database, user_id: int):
     async with db.conn.execute(
-        "SELECT * FROM marches WHERE discord_user_id = ? ORDER BY finishes_at ASC",
+        """
+        SELECT m.*, h.name AS hero_name, h.rarity AS hero_rarity
+        FROM marches m
+        LEFT JOIN heroes h ON h.id = m.hero_id
+        WHERE m.discord_user_id = ?
+        ORDER BY m.finishes_at ASC
+        """,
         (user_id,),
     ) as cur:
         return await cur.fetchall()
 
 
-async def _start_gather(db: Database, user_id: int, resource: Resource) -> Flash:
+async def _fetch_owned_heroes(db: Database, user_id: int):
+    async with db.conn.execute(
+        """
+        SELECT h.id, h.name, h.rarity, o.level
+        FROM owned_heroes o
+        JOIN heroes h ON h.id = o.hero_id
+        WHERE o.discord_user_id = ?
+        ORDER BY o.level DESC, h.name
+        """,
+        (user_id,),
+    ) as cur:
+        return await cur.fetchall()
+
+
+async def _busy_hero_ids(db: Database, user_id: int) -> set[int]:
+    """Heroes locked in an active gather or hunt march."""
+    busy: set[int] = set()
+    async with db.conn.execute(
+        "SELECT DISTINCT hero_id FROM marches "
+        "WHERE discord_user_id = ? AND hero_id IS NOT NULL",
+        (user_id,),
+    ) as cur:
+        for row in await cur.fetchall():
+            busy.add(int(row["hero_id"]))
+    async with db.conn.execute(
+        "SELECT DISTINCT hero_id FROM hunt_marches "
+        "WHERE discord_user_id = ? AND resolved = 0 AND hero_id IS NOT NULL",
+        (user_id,),
+    ) as cur:
+        for row in await cur.fetchall():
+            busy.add(int(row["hero_id"]))
+    return busy
+
+
+async def _start_gather(
+    db: Database,
+    user_id: int,
+    resource: Resource,
+    hero_id: int | None,
+) -> Flash:
     player = await _fetch_player(db, user_id)
     capacity = int(player["march_capacity"])
     marches = await _fetch_marches(db, user_id)
@@ -72,22 +121,45 @@ async def _start_gather(db: Database, user_id: int, resource: Resource) -> Flash
         return Flash.err(
             f"All {capacity} march slot(s) busy — claim a finished gather first."
         )
+    if hero_id is None:
+        return Flash.err("Pick a hero from the dropdown first.")
+
+    # Confirm ownership + freshness.
+    async with db.conn.execute(
+        "SELECT o.level FROM owned_heroes o "
+        "WHERE o.discord_user_id = ? AND o.hero_id = ?",
+        (user_id, hero_id),
+    ) as cur:
+        hero_row = await cur.fetchone()
+    if hero_row is None:
+        return Flash.err("That hero isn't in your roster.")
+
+    busy = await _busy_hero_ids(db, user_id)
+    if hero_id in busy:
+        return Flash.err("That hero is already in another march.")
 
     roll = roll_gather(resource)
     yield_pct = int(player["gather_yield_pct"])
     speed_pct = int(player["gather_speed_pct"])
-    # Apply research bonuses at start time so the row is fully determined.
+    hero_speed = march_speed_pct(int(hero_row["level"]))
     boosted_base = int(roll.base * (100 + yield_pct) / 100)
-    duration = max(1, int(GATHER_DURATION_SECONDS * (100 - min(99, speed_pct)) / 100))
+    duration = scaled_gather_duration(
+        GATHER_DURATION_SECONDS,
+        hero_march_speed_pct=hero_speed,
+        research_speed_pct=speed_pct,
+    )
     now = int(time.time())
     finishes_at = now + duration
     await db.conn.execute(
         """
         INSERT INTO marches (discord_user_id, resource, started_at, finishes_at,
-                             yield_amount, crit)
-        VALUES (?, ?, ?, ?, ?, ?)
+                             yield_amount, crit, hero_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (user_id, resource, now, finishes_at, boosted_base, 1 if roll.crit else 0),
+        (
+            user_id, resource, now, finishes_at, boosted_base,
+            1 if roll.crit else 0, hero_id,
+        ),
     )
     await db.conn.commit()
     return Flash.ok(f"Sent a march to gather {resource}.")
@@ -160,22 +232,73 @@ async def _render_embed(db: Database, user: discord.abc.User) -> discord.Embed:
         for i, row in enumerate(marches, start=1):
             emoji = RESOURCE_EMOJI.get(row["resource"], "•")
             finishes_at = int(row["finishes_at"])
+            hero_tag = f" · 🪄 {row['hero_name']}" if row["hero_name"] else ""
             if is_finished(finishes_at, now):
-                lines.append(f"`{i}.` {emoji} {row['resource']} — **ready to claim**")
+                lines.append(
+                    f"`{i}.` {emoji} {row['resource']}{hero_tag} — "
+                    "**ready to claim**"
+                )
             else:
                 lines.append(
-                    f"`{i}.` {emoji} {row['resource']} — claims <t:{finishes_at}:R>"
+                    f"`{i}.` {emoji} {row['resource']}{hero_tag} — "
+                    f"claims <t:{finishes_at}:R>"
                 )
         embed.add_field(name="In progress", value="\n".join(lines), inline=False)
     else:
         embed.add_field(
             name="In progress",
-            value="No active gathers. Pick a resource to start one.",
+            value="Pick a hero below, then click a resource to send a march.",
             inline=False,
         )
 
-    embed.set_footer(text=f"Each gather takes {GATHER_DURATION_SECONDS // 60} minutes.")
+    embed.set_footer(
+        text=(
+            f"Base gather: {GATHER_DURATION_SECONDS // 60} min · "
+            "hero march-speed shortens it (capped at 80%)."
+        )
+    )
     return embed
+
+
+# -- hero selector ----------------------------------------------------------
+
+
+class HeroSelect(discord.ui.Select):
+    def __init__(self, owned, busy: set[int], current: int | None) -> None:
+        options: list[discord.SelectOption] = []
+        for row in owned[:25]:
+            hero_id = int(row["id"])
+            busy_marker = " · busy" if hero_id in busy else ""
+            options.append(
+                discord.SelectOption(
+                    label=f"{row['name']} · Lv {row['level']}{busy_marker}",
+                    description=row["rarity"].capitalize(),
+                    value=str(hero_id),
+                    default=(current is not None and hero_id == current),
+                )
+            )
+        if not options:
+            options = [
+                discord.SelectOption(
+                    label="No heroes owned",
+                    description="Use /summon to recruit.",
+                    value="none",
+                )
+            ]
+            super().__init__(
+                placeholder="No heroes owned",
+                options=options,
+                row=2,
+                disabled=True,
+            )
+            return
+        super().__init__(placeholder="Gather hero", options=options, row=2)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: GatherView = self.view  # type: ignore[assignment]
+        view.selected_hero_id = int(self.values[0])
+        await view._rebuild()
+        await view._refresh(interaction)
 
 
 # -- view -------------------------------------------------------------------
@@ -183,15 +306,34 @@ async def _render_embed(db: Database, user: discord.abc.User) -> discord.Embed:
 
 class GatherView(discord.ui.View):
     def __init__(self, db: Database, owner_id: int) -> None:
-        # 15 minutes matches the ephemeral interaction-token lifetime; after
-        # that, edit_message would fail anyway, so we time the buttons out.
         super().__init__(timeout=15 * 60)
         self.db = db
         self.owner_id = owner_id
+        self.selected_hero_id: int | None = None
+        self._hero_select: HeroSelect | None = None
+
+    async def initialize(self) -> None:
+        owned = await _fetch_owned_heroes(self.db, self.owner_id)
+        busy = await _busy_hero_ids(self.db, self.owner_id)
+        # Auto-pick first free hero so the panel is usable straight away.
+        for row in owned:
+            if int(row["id"]) not in busy:
+                self.selected_hero_id = int(row["id"])
+                break
+        await self._rebuild(owned, busy)
+
+    async def _rebuild(self, owned=None, busy=None) -> None:
+        if owned is None:
+            owned = await _fetch_owned_heroes(self.db, self.owner_id)
+        if busy is None:
+            busy = await _busy_hero_ids(self.db, self.owner_id)
+        for item in list(self.children):
+            if isinstance(item, discord.ui.Select):
+                self.remove_item(item)
+        self._hero_select = HeroSelect(owned, busy, self.selected_hero_id)
+        self.add_item(self._hero_select)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Ephemeral messages are only visible to the invoker, but defensively
-        # reject anyone else just in case Discord ever changes that.
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
                 "This isn't your gathering panel.", ephemeral=True
@@ -202,16 +344,22 @@ class GatherView(discord.ui.View):
     async def _refresh(
         self, interaction: discord.Interaction, flash: Flash | None = None
     ) -> None:
+        await self._rebuild()
         embed = await _render_embed(self.db, interaction.user)
         apply_flash(embed, flash)
-        await interaction.response.edit_message(embed=embed, view=self)
+        if interaction.response.is_done():
+            await interaction.edit_original_response(embed=embed, view=self)
+        else:
+            await interaction.response.edit_message(embed=embed, view=self)
 
-    async def _start(self, interaction: discord.Interaction, resource: Resource) -> None:
-        result = await _start_gather(self.db, interaction.user.id, resource)
-        # Success is implicit (the panel shows the new march); only red-flag failures.
-        await self._refresh(
-            interaction, flash=result if result.outcome.value == "error" else None
+    async def _start(
+        self, interaction: discord.Interaction, resource: Resource
+    ) -> None:
+        result = await _start_gather(
+            self.db, interaction.user.id, resource, self.selected_hero_id
         )
+        # Always surface the flash so the player sees errors and successes.
+        await self._refresh(interaction, flash=result)
 
     @discord.ui.button(label="Gold", emoji="💰", style=discord.ButtonStyle.primary, row=0)
     async def start_gold(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:

@@ -19,8 +19,8 @@ edit as a discussion with the user.
 | #6 | Hero leveling     | ✅ shipped | XP curve `100×L^1.5`, +5% ATK / +2% march-speed per level, cap 30 (banked XP at cap), `/admin grant-hero-xp` |
 | #7 | Hunt (`/hunt`)    | ✅ shipped | 12-level tenebrals (HP 750 → 100B), energy cap 500 / regen 1pt-30s, faux-timer 15–90s, persistent mob HP, daily quota 10 kills |
 | #8 | Hub (`/wa`)       | ✅ shipped | Single panel with status lines per subsystem + button-per-subpanel navigation, Back-to-Hub injected externally |
-| #9 | Admin hub         | ⏳ pending | Same shape for `/admin`: panel of buttons opening modals for each action |
-| #10 | Gather refactor  | ⏳ pending | Add hero slot, march time tied to hero march_speed_pct + research |
+| #9 | Admin hub         | ✅ shipped | `/admin hub` + Admin button in `/wa`. Eight action modals (grant, hero, XP, tier, queue, train speed, research, reset). Starter Vivienne grant on every player. |
+| #10 | Gather refactor  | ✅ shipped | Hero slot per gather march, hero locked while in flight, duration shortened by hero march_speed_pct + research speed (clamped 80%). |
 | #11 | Combat           | ⏳ pending | Auto-battler loosely based on in-game WA; element triangle TBD; troops + commander hero per side |
 | #12 | Raids            | ⏳ pending | Solo PvE first (R1–R6 → void vesps → dominion boss). Energy gated. PvP raids later |
 | #13 | Daily / progression | ⏳ pending | Login rewards, streaks, account-wide XP — defer until PvE feels good |
