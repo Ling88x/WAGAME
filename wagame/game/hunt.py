@@ -158,21 +158,26 @@ def march_power(
     hero_atk: int,
     troops: list[TroopStack],
     troop_attack_pct: int = 0,
+    hero_command_pct: int = 0,
 ) -> int:
     """Compute total march damage for a single attack.
 
     Hero ATK is the hero's `atk_eff` at its current level (see
-    hero_levels.atk_eff). Troops contribute `attack * count` summed
-    across the player's inventory — auto-fill, no per-stack selection in
-    v1. The research bonus stacks on the combined total.
+    hero_levels.atk_eff) — small, personal contribution. The big lever
+    is `hero_command_pct` (hero_levels.command_pct), which multiplies
+    the combined hero+troop damage like a leadership buff. Research
+    troop_attack_pct stacks on top as a separate multiplier.
     """
     if hero_atk < 0:
         raise ValueError("hero_atk must be >= 0")
     if troop_attack_pct < -99:
         raise ValueError("troop_attack_pct must be > -100")
+    if hero_command_pct < -99:
+        raise ValueError("hero_command_pct must be > -100")
     troops_atk = sum(stack.attack_contribution for stack in troops)
-    raw = hero_atk + troops_atk
-    return int(raw * (100 + troop_attack_pct) / 100)
+    base = hero_atk + troops_atk
+    # Single rounding step avoids drift from multiplying-then-truncating.
+    return int(base * (100 + hero_command_pct) * (100 + troop_attack_pct) / 10000)
 
 
 def min_power_for_level(level: int) -> int:

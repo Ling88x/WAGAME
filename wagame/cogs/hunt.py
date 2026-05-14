@@ -31,6 +31,7 @@ from wagame.game.daily import current_reset_day
 from wagame.game.hero_levels import (
     apply_xp_gain,
     atk_eff,
+    command_pct,
     march_speed_pct,
 )
 from wagame.game.hunt import (
@@ -389,10 +390,18 @@ async def _render_embed(
 
     hero_atk_value = 0
     hero_speed = 0
+    hero_command = 0
     if hero_row is not None:
-        hero_atk_value = atk_eff(hero_row["rarity"], int(hero_row["level"]))
-        hero_speed = march_speed_pct(int(hero_row["level"]))
-    power = march_power(hero_atk_value, troops, troop_attack_pct=troop_attack_pct)
+        hero_level = int(hero_row["level"])
+        hero_atk_value = atk_eff(hero_row["rarity"], hero_level)
+        hero_speed = march_speed_pct(hero_level)
+        hero_command = command_pct(hero_level)
+    power = march_power(
+        hero_atk_value,
+        troops,
+        troop_attack_pct=troop_attack_pct,
+        hero_command_pct=hero_command,
+    )
 
     spec = get_tenebral(selected_level)
     spawn = None
@@ -422,13 +431,19 @@ async def _render_embed(
     )
 
     troops_total = sum(t.count for t in troops)
+    troops_atk_sum = sum(t.attack_contribution for t in troops)
+    base = hero_atk_value + troops_atk_sum
+    mults: list[str] = []
+    if hero_command:
+        mults.append(f"command x{1 + hero_command / 100:.2f}")
+    if troop_attack_pct:
+        mults.append(f"research x{1 + troop_attack_pct / 100:.2f}")
+    mults_str = f" -> {' x '.join(mults)}" if mults else ""
     embed.add_field(
         name=f"⚔️ March Power {power:,}",
         value=(
-            f"Hero: {hero_atk_value:,}"
-            f" · Troops: {sum(t.attack_contribution for t in troops):,}"
-            f" ({troops_total:,} units)"
-            f"{f' · +{troop_attack_pct}% research' if troop_attack_pct else ''}"
+            f"Hero {hero_atk_value:,} + Troops {troops_atk_sum:,} "
+            f"({troops_total:,} units) = {base:,}{mults_str}"
         ),
         inline=False,
     )
@@ -451,11 +466,16 @@ async def _render_embed(
     if hero_row is None:
         hero_line = "**No hero selected** — pick one below."
     else:
-        hero_line = (
-            f"**{hero_row['name']}** · Lv {hero_row['level']} · "
-            f"⚔️ {hero_atk_value:,}"
-            + (f" · 🏇 +{hero_speed}%" if hero_speed else "")
-        )
+        bits = [
+            f"**{hero_row['name']}**",
+            f"Lv {hero_row['level']}",
+            f"⚔️ {hero_atk_value:,}",
+        ]
+        if hero_command:
+            bits.append(f"🎖️ +{hero_command}% cmd")
+        if hero_speed:
+            bits.append(f"🏇 +{hero_speed}%")
+        hero_line = " · ".join(bits)
     embed.add_field(name="🪄 Hero", value=hero_line, inline=False)
 
     quota_state = (
@@ -658,10 +678,15 @@ class HuntView(discord.ui.View):
 
         troops = await _fetch_troops(self.db, interaction.user.id)
         player = await _fetch_player(self.db, interaction.user.id)
-        hero_atk_value = atk_eff(hero_row["rarity"], int(hero_row["level"]))
-        hero_speed = march_speed_pct(int(hero_row["level"]))
+        hero_level = int(hero_row["level"])
+        hero_atk_value = atk_eff(hero_row["rarity"], hero_level)
+        hero_speed = march_speed_pct(hero_level)
+        hero_command = command_pct(hero_level)
         power = march_power(
-            hero_atk_value, troops, troop_attack_pct=int(player["troop_attack_pct"])
+            hero_atk_value,
+            troops,
+            troop_attack_pct=int(player["troop_attack_pct"]),
+            hero_command_pct=hero_command,
         )
         min_power = min_power_for_level(level)
         if power < min_power:

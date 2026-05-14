@@ -6,12 +6,14 @@ import pytest
 
 from wagame.game.hero_levels import (
     ATK_PCT_PER_LEVEL,
+    COMMAND_PCT_PER_LEVEL,
     MARCH_SPEED_PCT_PER_LEVEL,
     RARITY_BASE_ATK,
     STARTING_LEVEL_CAP,
     apply_xp_gain,
     atk_eff,
     base_atk_for_rarity,
+    command_pct,
     march_speed_pct,
     xp_to_next,
 )
@@ -85,6 +87,27 @@ def test_march_speed_grows_linearly() -> None:
 
 def test_march_speed_pct_per_level_constant() -> None:
     assert MARCH_SPEED_PCT_PER_LEVEL == 2
+
+
+# -- command_pct ----------------------------------------------------------
+
+
+def test_command_at_level_one_is_zero() -> None:
+    assert command_pct(1) == 0
+
+
+def test_command_grows_linearly() -> None:
+    assert command_pct(10) == 45
+    assert command_pct(STARTING_LEVEL_CAP) == 145
+
+
+def test_command_pct_per_level_constant() -> None:
+    assert COMMAND_PCT_PER_LEVEL == 5
+
+
+def test_command_rejects_level_zero() -> None:
+    with pytest.raises(ValueError):
+        command_pct(0)
 
 
 # -- apply_xp_gain --------------------------------------------------------

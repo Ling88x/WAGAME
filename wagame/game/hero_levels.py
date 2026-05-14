@@ -35,6 +35,11 @@ from dataclasses import dataclass
 STARTING_LEVEL_CAP = 30
 ATK_PCT_PER_LEVEL = 5
 MARCH_SPEED_PCT_PER_LEVEL = 2
+# Per-level "leadership" buff to the WHOLE march (hero + troops). Hero
+# atk_eff is the hero's personal contribution; command_pct is the big
+# lever that makes a level-30 commander feel different from a level-1
+# one. +5% per level -> Lv30 commander multiplies march power by 2.45.
+COMMAND_PCT_PER_LEVEL = 5
 
 RARITY_BASE_ATK: dict[str, int] = {
     "mythic":    500,
@@ -73,6 +78,13 @@ def march_speed_pct(level: int) -> int:
     if level < 1:
         raise ValueError(f"level must be >= 1, got {level}")
     return (level - 1) * MARCH_SPEED_PCT_PER_LEVEL
+
+
+def command_pct(level: int) -> int:
+    """Per-hero leadership buff (percent points) applied to whole march power."""
+    if level < 1:
+        raise ValueError(f"level must be >= 1, got {level}")
+    return (level - 1) * COMMAND_PCT_PER_LEVEL
 
 
 @dataclass(frozen=True)

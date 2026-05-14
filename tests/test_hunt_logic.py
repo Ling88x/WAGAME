@@ -142,11 +142,33 @@ def test_march_power_applies_research_buff() -> None:
     assert march_power(hero_atk=0, troops=troops, troop_attack_pct=50) == 30_000
 
 
+def test_march_power_applies_command_buff() -> None:
+    troops = [TroopStack("catsith", "Catsith", 1, attack=60, count=100)]
+    # 60*100 + hero 0 = 6_000; +145% command (Lv30) -> 14_700.
+    assert march_power(hero_atk=0, troops=troops, hero_command_pct=145) == 14_700
+
+
+def test_march_power_stacks_command_and_research() -> None:
+    troops = [TroopStack("catsith", "Catsith", 1, attack=60, count=100)]
+    # base 6_000 * (1+1.45) * (1+0.50) = 6_000 * 2.45 * 1.50 = 22_050
+    assert (
+        march_power(
+            hero_atk=0,
+            troops=troops,
+            troop_attack_pct=50,
+            hero_command_pct=145,
+        )
+        == 22_050
+    )
+
+
 def test_march_power_rejects_bad_inputs() -> None:
     with pytest.raises(ValueError):
         march_power(hero_atk=-1, troops=[])
     with pytest.raises(ValueError):
         march_power(hero_atk=0, troops=[], troop_attack_pct=-150)
+    with pytest.raises(ValueError):
+        march_power(hero_atk=0, troops=[], hero_command_pct=-150)
 
 
 def test_min_power_for_level_scales_with_hp() -> None:
