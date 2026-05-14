@@ -102,6 +102,9 @@ async def _hub_state(db: Database, user_id: int) -> dict:
     ) as cur:
         bestiary_row = await cur.fetchone()
 
+    today_iso = current_reset_day().isoformat()
+    vault_opened_today = (player["last_vault_open_date"] == today_iso)
+
     return {
         "player": player,
         "energy": energy,
@@ -116,6 +119,8 @@ async def _hub_state(db: Database, user_id: int) -> dict:
         "heroes_count": int(heroes_row["n"] or 0),
         "sighting": sighting,
         "bestiary_documented": int(bestiary_row["n"] or 0),
+        "vault_streak": int(player["vault_streak"] or 0),
+        "vault_opened_today": vault_opened_today,
     }
 
 
@@ -182,6 +187,15 @@ def _quota_line(state: dict) -> str:
     return f"{kills}/{DAILY_QUOTA_KILLS} kills"
 
 
+def _vault_line(state: dict) -> str:
+    streak = state["vault_streak"]
+    if state["vault_opened_today"]:
+        return f"🔥 Streak {streak} · opened today"
+    if streak == 0:
+        return "**Ready to open** — start a streak"
+    return f"🔥 Streak {streak} · **ready to open**"
+
+
 def _sighting_line(state: dict) -> str | None:
     """Active Tenebral Sighting summary line, or None when no sighting."""
     row = state["sighting"]
@@ -222,6 +236,7 @@ async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embe
     embed.add_field(name="⛏️ Gathering", value=_gather_line(state), inline=False)
     embed.add_field(name="🔬 Research", value=_research_line(state), inline=False)
     embed.add_field(name="🏰 Training", value=_train_line(state), inline=False)
+    embed.add_field(name="🗝 Vault", value=_vault_line(state), inline=False)
     embed.add_field(name="📅 Daily quota", value=_quota_line(state), inline=True)
     embed.add_field(
         name="🎴 Heroes",
@@ -435,6 +450,16 @@ class HubView(discord.ui.View):
     ) -> None:
         from wagame.cogs.bestiary import BestiaryView, render_embed
         view = BestiaryView(self.db, self.owner_id)
+        view.add_item(self._back())
+        embed = await render_embed(self.db, interaction.user)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Vault", emoji="🗝", style=discord.ButtonStyle.success, row=2)
+    async def open_vault(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        from wagame.cogs.vault import VaultView, render_embed
+        view = VaultView(self.db, self.owner_id)
         view.add_item(self._back())
         embed = await render_embed(self.db, interaction.user)
         await interaction.response.edit_message(embed=embed, view=view)

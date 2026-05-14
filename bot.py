@@ -26,6 +26,7 @@ INITIAL_COGS = (
     "wagame.cogs.diary",
     "wagame.cogs.sightings",
     "wagame.cogs.bestiary",
+    "wagame.cogs.vault",
     "wagame.cogs.hub",
 )
 
