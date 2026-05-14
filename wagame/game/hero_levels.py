@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-STARTING_LEVEL_CAP = 30
+STARTING_LEVEL_CAP = 110
 ATK_PCT_PER_LEVEL = 5
 MARCH_SPEED_PCT_PER_LEVEL = 2
 # Per-level "leadership" buff to the WHOLE march (hero + troops). Hero

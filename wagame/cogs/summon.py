@@ -1,10 +1,10 @@
-"""/summon — summon hero shards for a specific hero.
+"""/summon — summoning panel with a hero slider.
 
-One ephemeral panel per `/summon hero:<name>` invocation. The panel
-shows the player's gem balance, progress toward unlock for the target
-hero, pity counter, and a Summon button. Clicking Summon spends gems,
-rolls shards, persists the result, and edits the embed in place with
-a color-coded flash (green on unlock, blue on jackpot, neutral otherwise).
+One ephemeral panel that flips through every hero in the catalog with
+`◀` / `▶` buttons; the centre `🔮 Summon` button spends gems on whoever
+is currently shown. Same panel handles all heroes — no need to type a
+name or autocomplete (slash still accepts an optional `hero` arg as a
+power-user jump-to).
 
 Heroes are auto-inserted into `owned_heroes` the moment their shard
 count crosses 100 — no separate "claim" step. Excess shards keep
@@ -32,6 +32,24 @@ from wagame.ui import Flash, apply_flash
 
 log = logging.getLogger(__name__)
 
+# Order matches the autocomplete + roster panels: rarity high-to-low,
+# then alphabetical by name. Cached on view init so flipping is instant.
+_ROSTER_SORT_SQL = """
+SELECT id, name, codename, rarity, image_url
+FROM heroes
+ORDER BY
+    CASE rarity
+        WHEN 'mythic'    THEN 0
+        WHEN 'legendary' THEN 1
+        WHEN 'epic'      THEN 2
+        WHEN 'rare'      THEN 3
+        WHEN 'uncommon'  THEN 4
+        WHEN 'common'    THEN 5
+        ELSE 6
+    END,
+    name
+"""
+
 
 # -- DB helpers -------------------------------------------------------------
 
@@ -49,6 +67,19 @@ async def _fetch_hero_by_name(db: Database, needle: str):
         "SELECT * FROM heroes WHERE codename = ?", (n,)
     ) as cur:
         return await cur.fetchone()
+
+
+async def _fetch_hero_by_id(db: Database, hero_id: int):
+    async with db.conn.execute(
+        "SELECT * FROM heroes WHERE id = ?", (hero_id,)
+    ) as cur:
+        return await cur.fetchone()
+
+
+async def fetch_roster(db: Database) -> list[int]:
+    """All hero ids in display order. Public so the hub button can seed a view."""
+    async with db.conn.execute(_ROSTER_SORT_SQL) as cur:
+        return [int(r["id"]) for r in await cur.fetchall()]
 
 
 async def _fetch_shards(db: Database, user_id: int, hero_id: int) -> tuple[int, int]:
@@ -95,9 +126,6 @@ async def execute_summon(
         (user_id, hero_row["id"], result.new_total, result.new_pity),
     )
     if result.unlocked_now:
-        # First-time unlock — insert at level 1 with no dupes pending. If
-        # the player already owns this hero (shouldn't happen since pity
-        # resets on unlock, but defensive), we just bump dupes_pending.
         await db.conn.execute(
             """
             INSERT INTO owned_heroes (discord_user_id, hero_id, level)
@@ -139,6 +167,9 @@ async def _render_embed(
     db: Database,
     user: discord.abc.User,
     hero_row,
+    *,
+    index: int | None = None,
+    total: int | None = None,
     flash: Flash | None = None,
 ) -> discord.Embed:
     player = await db.get_or_create_player(user.id)
@@ -147,8 +178,13 @@ async def _render_embed(
 
     color = RARITY_COLOR.get(hero_row["rarity"])
     rarity_emoji = RARITY_EMOJI.get(hero_row["rarity"], "•")
+    position = (
+        f"  ({index + 1}/{total})"
+        if index is not None and total is not None
+        else ""
+    )
     embed = discord.Embed(
-        title=f"🔮 Summon — {rarity_emoji} {hero_row['name']}",
+        title=f"🔮 {rarity_emoji} {hero_row['name']}{position}",
         color=color,
     )
     if hero_row["image_url"]:
@@ -171,16 +207,16 @@ async def _render_embed(
         progress = f"**Unlocked** · {count} shards banked"
     else:
         bar = _progress_bar(min(count, SHARDS_PER_UNLOCK), SHARDS_PER_UNLOCK)
-        progress = f"{bar}  {count}/{SHARDS_PER_UNLOCK}"
+        progress = (
+            f"{bar}  {count}/{SHARDS_PER_UNLOCK}\n"
+            f"You need {SHARDS_PER_UNLOCK} shards to unlock a hero."
+        )
     embed.add_field(name="Unlock progress", value=progress, inline=False)
 
     embed.add_field(
         name="Pity",
         value=f"{pity}/{PITY_LIMIT} summons",
         inline=True,
-    )
-    embed.set_footer(
-        text="Every summon yields ≥1 shard. Pity guarantees unlock by the 100th summon."
     )
     return embed
 
@@ -194,11 +230,23 @@ def _progress_bar(value: int, total: int, width: int = 20) -> str:
 
 
 class SummonView(discord.ui.View):
-    def __init__(self, db: Database, owner_id: int, hero_id: int) -> None:
+    def __init__(
+        self,
+        db: Database,
+        owner_id: int,
+        hero_ids: list[int],
+        *,
+        index: int = 0,
+    ) -> None:
         super().__init__(timeout=15 * 60)
         self.db = db
         self.owner_id = owner_id
-        self.hero_id = hero_id
+        self.hero_ids = hero_ids
+        self.index = index % len(hero_ids) if hero_ids else 0
+
+    @property
+    def current_hero_id(self) -> int:
+        return self.hero_ids[self.index]
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -208,42 +256,71 @@ class SummonView(discord.ui.View):
             return False
         return True
 
-    async def _hero_row(self):
-        async with self.db.conn.execute(
-            "SELECT * FROM heroes WHERE id = ?", (self.hero_id,)
-        ) as cur:
-            return await cur.fetchone()
+    async def _refresh(
+        self,
+        interaction: discord.Interaction,
+        flash: Flash | None = None,
+    ) -> None:
+        hero_row = await _fetch_hero_by_id(self.db, self.current_hero_id)
+        if hero_row is None:
+            # Hero deleted mid-flight — fall back to next index.
+            self.hero_ids.pop(self.index)
+            if not self.hero_ids:
+                await interaction.response.edit_message(
+                    content="The summon catalog is empty.", embed=None, view=None
+                )
+                return
+            self.index %= len(self.hero_ids)
+            hero_row = await _fetch_hero_by_id(self.db, self.current_hero_id)
+        embed = await _render_embed(
+            self.db,
+            interaction.user,
+            hero_row,
+            index=self.index,
+            total=len(self.hero_ids),
+            flash=flash,
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Summon", emoji="🔮", style=discord.ButtonStyle.success)
-    async def summon(
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_btn(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
-        hero_row = await self._hero_row()
+        self.index = (self.index - 1) % len(self.hero_ids)
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="Summon", emoji="🔮", style=discord.ButtonStyle.success, row=0)
+    async def summon_btn(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        hero_row = await _fetch_hero_by_id(self.db, self.current_hero_id)
         if hero_row is None:
-            # Hero deleted between panel open and click — show error and bail.
-            await interaction.response.edit_message(
-                content="That hero no longer exists.", embed=None, view=None
+            await self._refresh(
+                interaction, flash=Flash.err("That hero is gone.")
             )
             return
 
         cost = summon_cost(hero_row["rarity"])
         player = await self.db.get_or_create_player(interaction.user.id)
         if int(player["gems"]) < cost:
-            embed = await _render_embed(
-                self.db,
-                interaction.user,
-                hero_row,
+            await self._refresh(
+                interaction,
                 flash=Flash.err(
                     f"Not enough gems — need {cost:,} 💎, "
                     f"have {int(player['gems']):,}."
                 ),
             )
-            await interaction.response.edit_message(embed=embed, view=self)
             return
 
         _, flash = await execute_summon(self.db, interaction.user.id, hero_row)
-        embed = await _render_embed(self.db, interaction.user, hero_row, flash=flash)
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self._refresh(interaction, flash=flash)
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary, row=0)
+    async def next_btn(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        self.index = (self.index + 1) % len(self.hero_ids)
+        await self._refresh(interaction)
 
 
 # -- cog --------------------------------------------------------------------
@@ -259,28 +336,38 @@ class SummonCog(commands.Cog):
 
     @app_commands.command(
         name="summon",
-        description="Open a summoning chest for a specific hero.",
+        description="Open the summoning panel.",
     )
     @app_commands.describe(
-        hero="Search by name or codename — pick from suggestions.",
+        hero="Optional: jump straight to a specific hero (name or codename).",
     )
-    async def summon(self, interaction: discord.Interaction, hero: str) -> None:
+    async def summon(
+        self,
+        interaction: discord.Interaction,
+        hero: str | None = None,
+    ) -> None:
         await self.db.get_or_create_player(interaction.user.id)
-        hero_row = await _fetch_hero_by_name(self.db, hero)
-        if hero_row is None:
+        hero_ids = await fetch_roster(self.db)
+        if not hero_ids:
             from wagame.ui import Outcome, toast
-
             await interaction.response.send_message(
-                embed=toast(
-                    f"No hero matches `{hero}`. Try the autocomplete suggestions.",
-                    Outcome.ERROR,
-                ),
+                embed=toast("Hero catalog is empty.", Outcome.ERROR),
                 ephemeral=True,
             )
             return
 
-        view = SummonView(self.db, interaction.user.id, int(hero_row["id"]))
-        embed = await _render_embed(self.db, interaction.user, hero_row)
+        index = 0
+        if hero:
+            hit = await _fetch_hero_by_name(self.db, hero)
+            if hit is not None and int(hit["id"]) in hero_ids:
+                index = hero_ids.index(int(hit["id"]))
+
+        view = SummonView(self.db, interaction.user.id, hero_ids, index=index)
+        hero_row = await _fetch_hero_by_id(self.db, view.current_hero_id)
+        embed = await _render_embed(
+            self.db, interaction.user, hero_row,
+            index=view.index, total=len(hero_ids),
+        )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @summon.autocomplete("hero")
@@ -292,3 +379,4 @@ class SummonCog(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(SummonCog(bot))
+

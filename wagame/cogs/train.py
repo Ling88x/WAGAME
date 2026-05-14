@@ -192,7 +192,7 @@ async def _render_embed(
     job = await _fetch_job(db, user.id)
     troops = await _fetch_unlocked_troops(db, int(player["unlocked_tier"]))
 
-    embed = discord.Embed(title="⚔️ Training Grounds")
+    embed = discord.Embed(title="🏰 Summoning Gate")
     embed.set_thumbnail(url=user.display_avatar.url)
     apply_flash(embed, flash)
 
@@ -207,7 +207,7 @@ async def _render_embed(
 
     embed.add_field(
         name="Unlocked tier",
-        value=f"T{int(player['unlocked_tier'])} (raise via research)",
+        value=f"T{int(player['unlocked_tier'])}",
         inline=False,
     )
 

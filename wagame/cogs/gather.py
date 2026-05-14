@@ -233,7 +233,7 @@ async def _render_embed(db: Database, user: discord.abc.User) -> discord.Embed:
     in_use = len(marches)
     embed.add_field(
         name="Marches",
-        value=f"{in_use}/{capacity} in use (cap {MAX_SLOTS} via research)",
+        value=f"{in_use}/{capacity} in use (max {MAX_SLOTS})",
         inline=False,
     )
 

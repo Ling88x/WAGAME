@@ -442,18 +442,11 @@ async def _render_embed(
 
     troops_total = sum(t.count for t in troops)
     troops_atk_sum = sum(t.attack_contribution for t in troops)
-    base = hero_atk_value + troops_atk_sum
-    mults: list[str] = []
-    if hero_command:
-        mults.append(f"command x{1 + hero_command / 100:.2f}")
-    if troop_attack_pct:
-        mults.append(f"research x{1 + troop_attack_pct / 100:.2f}")
-    mults_str = f" -> {' x '.join(mults)}" if mults else ""
     embed.add_field(
         name=f"⚔️ March Power {power:,}",
         value=(
             f"Hero {hero_atk_value:,} + Troops {troops_atk_sum:,} "
-            f"({troops_total:,} units) = {base:,}{mults_str}"
+            f"({troops_total:,} units)"
         ),
         inline=False,
     )
@@ -479,12 +472,12 @@ async def _render_embed(
         bits = [
             f"**{hero_row['name']}**",
             f"Lv {hero_row['level']}",
-            f"⚔️ {hero_atk_value:,}",
+            f"⚔️ {hero_atk_value:,} atk",
         ]
         if hero_command:
-            bits.append(f"🎖️ +{hero_command}% cmd")
+            bits.append(f"💪 +{hero_command}% power")
         if hero_speed:
-            bits.append(f"🏇 +{hero_speed}%")
+            bits.append(f"🏇 +{hero_speed}% speed")
         hero_line = " · ".join(bits)
     embed.add_field(name="🪄 Hero", value=hero_line, inline=False)
 
@@ -493,7 +486,7 @@ async def _render_embed(
         else ("ready to claim" if kills_today >= DAILY_QUOTA_KILLS else "in progress")
     )
     embed.add_field(
-        name=f"📅 Daily Quota — {kills_today}/{DAILY_QUOTA_KILLS}",
+        name=f"📅 Daily Quest — {kills_today}/{DAILY_QUOTA_KILLS}",
         value=f"{quota_state}\n"
               f"Reward: +{DAILY_QUOTA_REWARD_GEMS} gems · "
               f"+{DAILY_QUOTA_REWARD_RSS['gold']:,} gold/food/wood",

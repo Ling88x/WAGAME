@@ -82,7 +82,7 @@ def test_march_speed_at_level_one_is_zero() -> None:
 
 def test_march_speed_grows_linearly() -> None:
     assert march_speed_pct(10) == 18
-    assert march_speed_pct(STARTING_LEVEL_CAP) == 58
+    assert march_speed_pct(STARTING_LEVEL_CAP) == (STARTING_LEVEL_CAP - 1) * 2
 
 
 def test_march_speed_pct_per_level_constant() -> None:
@@ -98,7 +98,7 @@ def test_command_at_level_one_is_zero() -> None:
 
 def test_command_grows_linearly() -> None:
     assert command_pct(10) == 45
-    assert command_pct(STARTING_LEVEL_CAP) == 145
+    assert command_pct(STARTING_LEVEL_CAP) == (STARTING_LEVEL_CAP - 1) * 5
 
 
 def test_command_pct_per_level_constant() -> None:

@@ -218,7 +218,7 @@ async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embe
     player = state["player"]
 
     embed = discord.Embed(
-        title=f"🧙 {user.display_name}'s Hub",
+        title=f"🧙 {user.display_name}'s Campus",
         color=NEUTRAL_COLOR,
     )
     embed.set_thumbnail(url=user.display_avatar.url)
@@ -237,7 +237,7 @@ async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embe
     embed.add_field(name="🔬 Research", value=_research_line(state), inline=False)
     embed.add_field(name="🏰 Training", value=_train_line(state), inline=False)
     embed.add_field(name="🗝 Vault", value=_vault_line(state), inline=False)
-    embed.add_field(name="📅 Daily quota", value=_quota_line(state), inline=True)
+    embed.add_field(name="📅 Daily quest", value=_quota_line(state), inline=True)
     embed.add_field(
         name="🎴 Heroes",
         value=f"{state['heroes_count']} owned",
@@ -351,7 +351,7 @@ class HubView(discord.ui.View):
     def _back(self) -> BackToHubButton:
         return BackToHubButton(self.db, self.owner_id)
 
-    @discord.ui.button(label="Hunt", emoji="🦌", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="Monster Hunting", emoji="🦌", style=discord.ButtonStyle.danger, row=0)
     async def open_hunt(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
@@ -364,7 +364,10 @@ class HubView(discord.ui.View):
         )
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @discord.ui.button(label="Gather", emoji="⛏️", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(
+        label="Resource Gathering", emoji="⛏️",
+        style=discord.ButtonStyle.primary, row=0,
+    )
     async def open_gather(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
@@ -387,7 +390,7 @@ class HubView(discord.ui.View):
         )
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @discord.ui.button(label="Train", emoji="🏰", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Summon Troops", emoji="🏰", style=discord.ButtonStyle.primary, row=0)
     async def open_train(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
@@ -408,7 +411,7 @@ class HubView(discord.ui.View):
         )
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @discord.ui.button(label="Heroes", emoji="🎴", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Your Heroes", emoji="🎴", style=discord.ButtonStyle.secondary, row=1)
     async def open_heroes(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
@@ -419,15 +422,32 @@ class HubView(discord.ui.View):
         embeds = _build_page_embeds(interaction.user, rows, page=0)
         await interaction.response.edit_message(embeds=embeds, view=view)
 
-    @discord.ui.button(label="Summon", emoji="✨", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Get Heroes", emoji="✨", style=discord.ButtonStyle.secondary, row=1)
     async def open_summon(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
-        embed = await _render_summon_picker_embed(self.db, interaction.user)
-        view = _BackOnlyView(self.db, self.owner_id)
+        from wagame.cogs.summon import (
+            SummonView,
+            _fetch_hero_by_id,
+            _render_embed,
+            fetch_roster,
+        )
+        hero_ids = await fetch_roster(self.db)
+        if not hero_ids:
+            embed = await _render_summon_picker_embed(self.db, interaction.user)
+            view = _BackOnlyView(self.db, self.owner_id)
+            await interaction.response.edit_message(embed=embed, view=view)
+            return
+        view = SummonView(self.db, self.owner_id, hero_ids, index=0)
+        view.add_item(self._back())
+        hero_row = await _fetch_hero_by_id(self.db, view.current_hero_id)
+        embed = await _render_embed(
+            self.db, interaction.user, hero_row,
+            index=view.index, total=len(hero_ids),
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @discord.ui.button(label="Profile", emoji="👤", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="My Profile", emoji="👤", style=discord.ButtonStyle.secondary, row=1)
     async def open_profile(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
