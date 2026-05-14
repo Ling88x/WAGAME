@@ -416,7 +416,7 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
         level: int,
         user: discord.User | None = None,
     ) -> None:
-        from wagame.cogs.sightings import spawn_sighting
+        from wagame.cogs.sightings import SightingsCog, spawn_sighting
         target = user or interaction.user
         if level < 1 or level > 12:
             await interaction.response.send_message(
@@ -427,9 +427,48 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
         sighting_id = await spawn_sighting(
             self.db, target.id, hunt_level_unlocked=level, forced_level=level
         )
+        dm_sent = await SightingsCog.dispatch_dm(
+            interaction.client, self.db, sighting_id  # type: ignore[arg-type]
+        )
+        dm_state = "DM delivered" if dm_sent else "DM not delivered (see logs)"
         await interaction.response.send_message(
-            f"Spawned sighting #{sighting_id} (Lv{level}) for {target.mention}.",
+            f"Spawned sighting #{sighting_id} (Lv{level}) for {target.mention}. "
+            f"{dm_state}.",
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="test-dm",
+        description="Send a hello-world DM to verify the bot can reach you.",
+    )
+    @app_commands.describe(user="Target user. Defaults to you.")
+    @app_commands.check(_is_bot_owner)
+    async def test_dm(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User | None = None,
+    ) -> None:
+        target = user or interaction.user
+        try:
+            await target.send(
+                "🔔 Test DM from wagame — your inbox is reachable. "
+                "If you see this, Hero Diary and Sighting DMs should land too."
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"{target.mention} blocks the bot's DMs "
+                "(server-side privacy setting). Diary + Sightings DMs will "
+                "silently fail until that's changed.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as exc:
+            await interaction.response.send_message(
+                f"DM failed with HTTP error: {exc}", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            f"Test DM sent to {target.mention}.", ephemeral=True
         )
 
 

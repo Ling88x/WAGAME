@@ -50,6 +50,7 @@ async def try_send_diary(
     caller's gameplay path shouldn't care.
     """
     if hero_id is None:
+        log.debug("diary skip: hero_id is None (event %s, user %d)", event, user_id)
         return False
 
     # Opt-in check.
@@ -58,7 +59,11 @@ async def try_send_diary(
         (user_id,),
     ) as cur:
         player_row = await cur.fetchone()
-    if player_row is None or not int(player_row["diary_dm_enabled"]):
+    if player_row is None:
+        log.info("diary skip: no player row for user %d", user_id)
+        return False
+    if not int(player_row["diary_dm_enabled"]):
+        log.info("diary skip: user %d has DMs opted out", user_id)
         return False
 
     # Throttle check.
@@ -70,10 +75,18 @@ async def try_send_diary(
     ) as cur:
         hero_row = await cur.fetchone()
     if hero_row is None:
+        log.info(
+            "diary skip: user %d does not own hero %d", user_id, hero_id
+        )
         return False
 
     now = int(time.time())
-    if not should_send(int(hero_row["last_diary_at"]), now):
+    last_at = int(hero_row["last_diary_at"])
+    if not should_send(last_at, now):
+        log.info(
+            "diary skip: throttled (user %d, hero %d, last_at %d, now %d)",
+            user_id, hero_id, last_at, now,
+        )
         return False
 
     # Compose.
@@ -95,13 +108,18 @@ async def try_send_diary(
     try:
         user = bot.get_user(user_id) or await bot.fetch_user(user_id)
     except discord.NotFound:
+        log.warning("diary skip: user %d not resolvable", user_id)
         return False
     try:
         message = f"**{hero_row['name']}**: {line}"
         await user.send(message)
-    except (discord.Forbidden, discord.HTTPException):
-        # DMs closed or rate-limited — silently move on; we'll try
-        # again next event.
+    except discord.Forbidden:
+        log.info(
+            "diary skip: user %d has DMs closed / blocks the bot", user_id
+        )
+        return False
+    except discord.HTTPException as exc:
+        log.warning("diary HTTP error to user %d: %s", user_id, exc)
         return False
 
     await db.conn.execute(
@@ -110,6 +128,7 @@ async def try_send_diary(
         (now, user_id, hero_id),
     )
     await db.conn.commit()
+    log.info("diary sent: user %d, hero %d, event %s", user_id, hero_id, event)
     return True
 
 

@@ -640,6 +640,41 @@ class SightingsCog(commands.Cog):
     async def _before_loop(self) -> None:
         await self.bot.wait_until_ready()
 
+    @staticmethod
+    async def dispatch_dm(
+        bot: commands.Bot, db: Database, sighting_id: int
+    ) -> bool:
+        """Module-level entry — both the spawn loop and `/admin spawn-sighting`
+        call this so a manually-spawned sighting still pings the player.
+        Returns True if a DM was actually delivered.
+        """
+        async with db.conn.execute(
+            "SELECT * FROM tenebral_sightings WHERE id = ?", (sighting_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            log.info("dispatch_dm: sighting %d not found", sighting_id)
+            return False
+        user_id = int(row["discord_user_id"])
+        try:
+            user = bot.get_user(user_id) or await bot.fetch_user(user_id)
+        except discord.NotFound:
+            log.warning("dispatch_dm: user %d not resolvable", user_id)
+            return False
+        embed = _dm_embed(row, user)
+        try:
+            await user.send(embed=embed)
+        except discord.Forbidden:
+            log.info(
+                "dispatch_dm: user %d has DMs closed or blocks the bot", user_id
+            )
+            return False
+        except discord.HTTPException as exc:
+            log.warning("dispatch_dm: HTTP error sending DM to %d: %s", user_id, exc)
+            return False
+        log.info("dispatch_dm: sighting %d DM sent to %d", sighting_id, user_id)
+        return True
+
     async def _spawn_due_sightings(self) -> None:
         now = int(time.time())
         async with self.db.conn.execute(
@@ -678,26 +713,9 @@ class SightingsCog(commands.Cog):
                     hunt_level_unlocked=3,
                     now=now,
                 )
-                await self._dm_sighting(user_id, sighting_id)
+                await SightingsCog.dispatch_dm(self.bot, self.db, sighting_id)
             except Exception:
                 log.exception("Failed to spawn sighting for user %d", user_id)
-
-    async def _dm_sighting(self, user_id: int, sighting_id: int) -> None:
-        async with self.db.conn.execute(
-            "SELECT * FROM tenebral_sightings WHERE id = ?", (sighting_id,)
-        ) as cur:
-            row = await cur.fetchone()
-        if row is None:
-            return
-        try:
-            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-        except discord.NotFound:
-            return
-        embed = _dm_embed(row, user)
-        try:
-            await user.send(embed=embed)
-        except (discord.Forbidden, discord.HTTPException):
-            log.info("Sighting DM blocked for user %d", user_id)
 
     @app_commands.command(
         name="sighting",
