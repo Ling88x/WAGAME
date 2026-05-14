@@ -438,6 +438,50 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
         )
 
     @app_commands.command(
+        name="simulate-combat",
+        description="Run the auto-battler between two players and post the log.",
+    )
+    @app_commands.describe(
+        user_a="Attacker (defaults to you).",
+        user_b="Defender.",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def simulate_combat(
+        self,
+        interaction: discord.Interaction,
+        user_b: discord.User,
+        user_a: discord.User | None = None,
+    ) -> None:
+        from wagame.game.combat import simulate_battle
+
+        attacker = user_a or interaction.user
+        await self.db.get_or_create_player(attacker.id)
+        await self.db.get_or_create_player(user_b.id)
+        a_combatant = await _build_combatant(self.db, attacker)
+        b_combatant = await _build_combatant(self.db, user_b)
+        if a_combatant is None or b_combatant is None:
+            await interaction.response.send_message(
+                "One of the players has no heroes — nothing to fight with.",
+                ephemeral=True,
+            )
+            return
+
+        result = simulate_battle(a_combatant, b_combatant)
+        # Discord caps embed description at 4096 chars; we trim if needed.
+        joined = "\n".join(result.log)
+        if len(joined) > 3800:
+            joined = joined[:3800] + "\n… (trimmed)"
+        embed = discord.Embed(
+            title=f"⚔️ {attacker.display_name} vs {user_b.display_name}",
+            description=joined,
+            color=discord.Color.from_rgb(248, 81, 73),
+        )
+        embed.set_footer(
+            text=f"Winner: {result.winner} · {result.rounds} round(s)"
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(
         name="test-dm",
         description="Send a hello-world DM to verify the bot can reach you.",
     )
@@ -951,6 +995,73 @@ class AdminHubView(discord.ui.View):
         await interaction.response.send_modal(
             ResetPlayerModal(self.db, self.owner_id)
         )
+
+
+async def _build_combatant(db: Database, user: discord.abc.User):
+    """Compose a `wagame.game.combat.Combatant` from a player's DB rows.
+
+    Picks the player's top-rarity highest-level hero as commander, sums
+    every owned troop's atk and hp, and pulls research multipliers off
+    the player row. Returns None if the player owns no heroes.
+    """
+    from wagame.game.combat import Combatant
+    from wagame.game.hero_levels import atk_eff, command_pct
+
+    async with db.conn.execute(
+        """
+        SELECT h.name, h.rarity, o.level FROM owned_heroes o
+        JOIN heroes h ON h.id = o.hero_id
+        WHERE o.discord_user_id = ?
+        ORDER BY
+            CASE h.rarity
+                WHEN 'mythic'    THEN 0
+                WHEN 'legendary' THEN 1
+                WHEN 'epic'      THEN 2
+                WHEN 'rare'      THEN 3
+                WHEN 'uncommon'  THEN 4
+                WHEN 'common'    THEN 5
+                ELSE 6
+            END,
+            o.level DESC,
+            h.name
+        LIMIT 1
+        """,
+        (user.id,),
+    ) as cur:
+        hero_row = await cur.fetchone()
+    if hero_row is None:
+        return None
+
+    async with db.conn.execute(
+        """
+        SELECT t.attack, t.hp, o.count FROM owned_troops o
+        JOIN troops t ON t.codename = o.troop_codename
+        WHERE o.discord_user_id = ? AND o.count > 0
+        """,
+        (user.id,),
+    ) as cur:
+        troop_rows = await cur.fetchall()
+    troops_atk = sum(int(r["attack"]) * int(r["count"]) for r in troop_rows)
+    troops_hp = sum(int(r["hp"]) * int(r["count"]) for r in troop_rows)
+
+    async with db.conn.execute(
+        "SELECT troop_attack_pct, troop_hp_pct FROM players "
+        "WHERE discord_user_id = ?",
+        (user.id,),
+    ) as cur:
+        player = await cur.fetchone()
+
+    hero_level = int(hero_row["level"])
+    return Combatant(
+        name=user.display_name,
+        hero_name=hero_row["name"],
+        hero_atk=atk_eff(hero_row["rarity"], hero_level),
+        hero_command_pct=command_pct(hero_level),
+        troops_atk=troops_atk,
+        troops_hp=troops_hp,
+        troop_attack_pct=int(player["troop_attack_pct"]) if player else 0,
+        troop_hp_pct=int(player["troop_hp_pct"]) if player else 0,
+    )
 
 
 async def setup(bot: commands.Bot) -> None:

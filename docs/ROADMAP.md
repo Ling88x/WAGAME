@@ -25,6 +25,7 @@ edit as a discussion with the user.
 | #12 | Sightings        | ✅ shipped | Random rare-mob spawns delivered by DM (6-24h gap per player). 2h engagement window, 3× RSS/XP rewards + 1-5 random hero shards. `/sighting` panel and hub Sighting button. `/admin spawn-sighting` for testing. |
 | #13 | Bestiary         | ✅ shipped | Per-player log of every tenebral encountered or slain. `/bestiary` panel + hub button + completion line in `/wa`. Counters bumped by every hunt/sighting engage; locked slots show as "???". |
 | #15 | Witch's Vault    | ✅ shipped | Daily-open loot box with a streak counter. 5 tier weights step up at streak 7/14/30, RSS+gems multiplier 1.0→2.0, milestone bonuses on day 7/14/30 (gems + random shards). `/vault` + hub button + status line in `/wa`. |
+| #14 | Combat engine    | ✅ shipped | Pure auto-battler. `Combatant` carries hero + aggregated troop stats + research multipliers; `simulate_battle` runs ±15% variance rounds (cap 10) with HP tiebreak. Stateless, deterministic with a seeded RNG. `/admin simulate-combat` posts a fight log between any two players. Foundation for Ghost Arena. |
 | #11 | Combat           | ⏳ pending | Auto-battler loosely based on in-game WA; element triangle TBD; troops + commander hero per side |
 | #12 | Raids            | ⏳ pending | Solo PvE first (R1–R6 → void vesps → dominion boss). Energy gated. PvP raids later |
 | #13 | Daily / progression | ⏳ pending | Login rewards, streaks, account-wide XP — defer until PvE feels good |
