@@ -1,209 +1,100 @@
 # Witch Arcana RPG — Discord bot
 
-> Read this file in full before doing anything else. You have **no memory**
-> of prior sessions; everything you need is here. The user expects you to
-> ask questions, not guess.
+> Read this file in full. You have **no memory** of prior sessions. The
+> user expects you to ask questions, not guess.
 
-## What this project is
+## What this is
 
-A Discord-native idle/RPG bot inspired by the mobile MMO **Witch Arcana**
-(ATA Studios — same studio as *Kingdoms of Heckfire*; WA is the spiritual
-successor). Players summon heroes ("witches"), upgrade them via research,
-gather resources on a timed loop, and run raids. Long-term roadmap includes
-PvP between players.
+Discord-native idle/RPG bot inspired by **Witch Arcana** (ATA Studios).
+Players summon heroes ("witches"), upgrade via research, gather on a
+timer, run raids. Long-term: PvP.
 
-This is a **separate codebase** from `wahelper` (the hourly-quest helper bot
-for the same game). They share the user, the source material, and the UX
-preferences below — and nothing else. Do not reach into `wahelper`'s domain
-from here, and do not duplicate its features.
+Separate codebase from `wahelper` (hourly-quest helper for the same
+game). Don't cross domains, don't duplicate its features.
 
-## Source of truth for the game
+## Sources of truth
 
-- Official help / wiki: https://athinkingape.helpshift.com/hc/en/7-witch-arcana---magic-school/
-- Hero database (community, comprehensive — names, rarity, element, terrain
-  affinity, bonuses, lore): https://kohqs.com/wa/heroes
-- In-game vocabulary cheat-sheet (user-provided): `docs/glossary.md` —
-  read this if anything in chat reads like jargon (TBs, DTH, OC, RSS, etc.).
+- Official wiki: https://athinkingape.helpshift.com/hc/en/7-witch-arcana---magic-school/
+- Hero database: https://kohqs.com/wa/heroes (rarity, element, terrain, bonuses)
+- In-game jargon: `docs/glossary.md`
+- PR ledger & backlog: `docs/ROADMAP.md`
+- Per-subsystem question blocks: `docs/DESIGN_QUESTIONS.md`
 
-Use `WebFetch` on specific pages when you need official names, mechanics,
-hero rosters, or balance data. **Do not invent game lore.** When the wiki is
-silent, ask the user — they play the game and will tell you.
+Use `WebFetch` for official names / mechanics. **Don't invent game lore.**
+When the wiki is silent, ask.
 
-## Confirmed scope (from user)
+## Confirmed scope (the seven pillars)
 
-These are the pillars the user has signed off on. Mechanics inside each one
-are intentionally underspecified — you must clarify before implementing.
+Mechanics inside each pillar are underspecified — clarify before coding.
 
-1. **Combat** — modelled loosely on in-game WA combat. The user will explain
-   the in-game rules when you start working on this. **Ask first.**
-2. **Hero collection — random shard rolls.** Players spend gems to summon
-   unlock shards for specific heroes; 100 shards unlocks a hero, pity caps
-   bad luck. Rarity tiers gate summon costs.
-3. **Research** — XP / resource sink that boosts damage and unlocks things.
-   Probably a tech tree. Shape and pacing — to be defined.
-4. **Solo raids** — PvE bosses. Eventually PvP raids between players;
-   defer until solo PvE feels good.
-5. **XP / progression** — earned through play, fuels research and other
-   upgrades. Sources and sinks — to be defined.
-6. **Gathering** — start a timed action, claim later. Resources: gold,
-   food, wood, plus event items in the future. Cooldown, slot count and
-   resource costs — to be defined.
-7. **Addictive-bot conveniences** — daily login rewards, streaks, leader-
-   boards, idle income, etc. **Ask which ones the user wants** before
-   building.
+1. **Combat** — loosely based on in-game WA combat. **Ask first.**
+2. **Hero collection** — gem-funded summons drop shards; 100 shards
+   unlocks a hero; pity caps bad luck. Rarity gates summon costs.
+3. **Research** — XP / resource sink. Probably a tech tree.
+4. **Solo raids** — PvE bosses. PvP raid layer comes later.
+5. **XP / progression** — fuels research and upgrades.
+6. **Gathering** — timed action, claim later. Gold, food, wood, + event
+   items in the future.
+7. **Addictive-bot conveniences** — daily logins, streaks, leaderboards,
+   idle income. **Ask which ones** before building.
 
-## What you must do FIRST in any new session
+## Workflow every new session
 
 1. Read this file.
-2. Greet the user briefly and confirm the system you're going to work on
-   (e.g. "let's do gathering today?"). The user will pick the next slice.
-3. **Ask clarifying questions before writing code.** The design is loose
-   on purpose. The user has explicitly asked: *"dopisz do briefu aby
-   dopytywał mnie o więcej szczegółów"* — they want you to interrogate
-   the requirements rather than ship a default implementation.
-4. Only after the design for that slice is pinned down, scaffold code.
-5. Persist state, write tests where it pays off, and commit incrementally.
+2. Greet briefly and confirm which slice we're touching today.
+3. **Read the relevant block in `docs/DESIGN_QUESTIONS.md` and ask
+   clarifying questions before writing code.** The user has explicitly
+   asked to be interrogated — *"dopisz do briefu aby dopytywał mnie o
+   więcej szczegółów"*. Don't ship a default implementation.
+4. Only after the slice is pinned down, scaffold code.
+5. Persist state, test where it pays off, commit incrementally.
 
-A non-exhaustive list of questions that must be answered before each
-respective system is built — work through them with the user, don't
-assume:
+## Hard rules (the contract — apply by default)
 
-**Tech foundations (ask once, early):**
-- Bot framework: `discord.py` 2.x (recommended, matches `wahelper`)?
-- Data store: `aiosqlite` with versioned migrations (recommended)?
-- Hosting / deployment target: same machine as `wahelper`? Separate token?
-- Python version target?
-- Persistence model: per-user globally, or per-guild silos? Cross-server
-  trade/PvP only makes sense in a global model.
-- Logging / observability needs?
-
-**Heroes & summoning:**
-- Source for hero list: scrape https://kohqs.com/wa/heroes, WebFetch the
-  official wiki, or user-provided seed file? (kohqs has the cleanest
-  structured data — name, rarity, element, terrain, bonuses.)
-- How many heroes at launch? Rarities?
-- Summon currency — gathered, daily-given, or paid (in-bot virtual)?
-- Pity system / soft-pity / spark?
-- Duplicate handling: shards / fodder / star-up?
-- Element / class affinities mirror the in-game ones — confirm list.
-
-**Combat:**
-- Turn-based, auto-battler, or real-time tick?
-- Element triangle? Rock-paper-scissors counters?
-- Team size? Formation rules?
-- Stats: HP / ATK / DEF / SPD / CRIT — same shape as the game?
-- Active abilities, passives, ultimates?
-- Status effects?
-- Where do we need to render battle output — a single embed updated tick
-  by tick, a battle log, or just a result screen?
-
-**Research:**
-- Tree shape: linear, branching, or grid?
-- What does each node unlock — flat damage %, new ability, new gather
-  slot?
-- Cost curve: gold? XP? hero shards? time?
-- Concurrent research limits, queueing, speedups?
-
-**Gathering:**
-- How many slots per player at start? Upgradable?
-- Cooldown ranges per resource?
-- Variable yields, RNG bonuses, crit drops?
-- What does each resource buy: gold (research), food (heal/feed heroes?),
-  wood (buildings? troops?)?
-- Event items: how introduced — admin command, scheduled events?
-
-**Raids:**
-- One-shot bosses or persistent HP across the day?
-- Cooldown / energy gating?
-- Reward tables tied to damage dealt, kill, or attendance?
-- Solo-only at v1, with PvP raid layer added later — confirmed.
-
-**Profile / progression:**
-- Player level vs hero level — separate?
-- Account-wide stat boosts vs per-hero?
-- Daily reset hour: same as in-game (21:00 UTC, see `wahelper`)?
-- Streaks: how forgiving? Grace days? Streak-freeze items?
-
-**UX / surface:**
-- Slash-command-only, or also context-menus, message commands?
-- One central `/wa` command with subcommands, or one command per system?
-- Should the bot work in DMs?
-- Are there public channel surfaces (e.g. raid announcements, leader-
-  boards posted to a configured channel)?
-
-## User preferences (carried over from `wahelper` — apply by default)
-
-The user is the same person across both projects. They have strong UX
-opinions; assume these unless told otherwise.
-
-- **No noise in channels.** Avoid bots that spam many messages. Prefer a
-  single rich embed that gets edited in place. The `wahelper` bot was
-  rebuilt from 25 messages to 2 because the original was visually loud.
-- **Persistent UI** — every panel is one message; interactions happen via
-  Buttons and Selects with stable `custom_id`s; views are re-registered
-  in `cog_load` via `bot.add_view(...)` so they survive restarts.
-- **Edit in place > delete + recreate.** Persist message IDs in your DB
-  and reuse them on restart. Never purge the channel as a side effect.
-- **Ephemeral by default for personal data** — your inventory, your
-  alerts, your stats: ephemeral interaction responses. Public surfaces
-  are for shared state only.
+- **No channel noise.** One rich embed, edited in place. Persist message
+  IDs and reuse on restart. Never purge channels.
+- **Persistent UI.** Buttons + Selects with stable `custom_id`; re-register
+  views in `cog_load` via `bot.add_view(...)`.
+- **Edit in place > delete + recreate.**
+- **Ephemeral by default for personal data.** Public surfaces only for
+  shared state.
 - **Buttons over reactions.** Always.
-- **Don't pre-build.** No speculative features, no "just-in-case"
-  abstractions, no scaffolding for hypothetical mechanics. The user
-  explicitly disliked this in `wahelper`.
-- **Polish chat, English code/comments/commits** — the user converses in
-  Polish; write code in English.
-- **Don't gratuitously add emoji** in commit messages or prose to the
-  user. Emoji are fine and welcome inside user-facing UI text.
-- **Confirm before destructive or shared-state actions** — DB migrations
-  with data loss, force-pushes, deletions. The user values being asked.
-- **Don't keep updating this CLAUDE.md without asking first.** Treat it
-  as a contract; revisions are a discussion, not a side effect.
+- **No speculative scaffolding.** No "just-in-case" abstractions, no
+  pre-builds for hypothetical mechanics.
+- **Polish chat, English code/comments/commits.**
+- **No gratuitous emoji** in commits or prose to the user. Emoji fine
+  inside UI text.
+- **Confirm before destructive / shared-state actions** — DB migrations
+  with data loss, force-push, deletions.
+- **Don't silently rewrite `CLAUDE.md` or `docs/ROADMAP.md`.** Both are
+  contracts; revisions are a discussion.
 
-## Recommended architecture (sketch — confirm with user)
+## Architecture (current)
 
-Treat as a default to be approved or replaced — the user may want some-
-thing else.
+- `discord.py` 2.x, one cog per system.
+- `aiosqlite`, single DB file, versioned migrations in `migrations/`,
+  applied on startup.
+- `.env` via `python-dotenv`; `.env.example` checked in, `.env` gitignored.
+- One slash command per system with subcommands.
+- Hub pattern: `/wa` (Campus) posts a single embed + buttons routing to
+  subpanels; state read from DB; view re-renders.
+- `discord.ext.tasks` for periodic ticks; watchdog + back-off retry.
 
-- `discord.py` 2.x; one cog per system (`gather`, `summon`, `combat`,
-  `research`, `raid`, `profile`, `daily`, `admin`).
-- `aiosqlite` for persistence. Single DB file per bot instance. Schema
-  versioned via a `migrations/` directory; migrations applied on startup.
-- Token + config in `.env` via `python-dotenv`. `.env.example` checked
-  in; `.env` gitignored.
-- Each cog exposes one slash command with subcommands (e.g. `/gather
-  start`, `/gather claim`, `/gather status`).
-- "Control panel" pattern: `/<system> panel` posts a single embed +
-  view that the user can pin. State changes always go through the DB;
-  the view re-renders from the DB.
-- Tasks (`discord.ext.tasks`) for periodic ticks (gather completion
-  checks, daily reset, raid windows). Watchdog + back-off retry like
-  in `wahelper`.
+## What this is NOT
 
-## What this project is NOT
+- Not a port of `wahelper`. If the user says "the bot", clarify which.
+- Not an in-game scraper. No API.
+- Not a multi-server economy at v1.
 
-- Not a port of `wahelper`. Don't add hourly-quest features here. If the
-  user mentions "the bot", clarify which one — they run both.
-- Not an in-game scraper. We don't have an API to the game.
-- Not a multi-server economy at v1. Cross-server PvP/trade is opt-in
-  and comes after solo gameplay feels good.
+## Pointers
 
-## Useful pointers
+- `wahelper` sibling repo: https://github.com/Ling88x/wahelper — read its
+  `hourly` cog for style (persistent views, edit-in-place, watchdog).
+- User on GitHub: `Ling88x`.
 
-- Sibling repo: https://github.com/Ling88x/wahelper (`hourly` cog there is
-  worth reading for style: persistent views, edit-in-place message
-  tracking, smoke-test on restart, watchdog + before_loop pattern).
-- WA wiki: https://athinkingape.helpshift.com/hc/en/7-witch-arcana---magic-school/
-- Hero database: https://kohqs.com/wa/heroes — full roster with rarity,
-  element, terrain affinity and bonus lists. Use as the canonical source
-  when seeding the summon pool.
-- The user is `Ling88x` on GitHub.
+## Session opener
 
-## Open with the user every new session
+> "Hi — I've read CLAUDE.md. Which system today? Walk me through the
+> rules / what 'good' looks like before I start."
 
-> "Hi — I've read CLAUDE.md. Which system are we touching today: gathering,
-> summoning, combat, research, raids, or progression? And before I start,
-> can you walk me through the rules / what 'good' looks like for that slice?"
-
-Then ask the relevant block of questions from the section above, agree on
-scope, and only then code.
+Then consult `docs/DESIGN_QUESTIONS.md` for that subsystem.
