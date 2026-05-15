@@ -29,6 +29,7 @@ INITIAL_COGS = (
     "wagame.cogs.vault",
     "wagame.cogs.arena",
     "wagame.cogs.council",
+    "wagame.cogs.bonds",
     "wagame.cogs.hub",
 )
 
