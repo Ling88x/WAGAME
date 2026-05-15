@@ -251,12 +251,16 @@ async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embe
     state = await _hub_state(db, user.id)
     player = state["player"]
 
+    from wagame.game.player_xp import title_for
+    pl_level = int(player["player_level"])
+    pl_title = title_for(pl_level)
     embed = discord.Embed(
         title=f"🧙 {user.display_name}'s Campus",
         color=NEUTRAL_COLOR,
     )
     embed.set_thumbnail(url=user.display_avatar.url)
     embed.description = (
+        f"**{pl_title} · Lv {pl_level}**\n"
         f"💰 {int(player['gold']):,}  ·  🍞 {int(player['food']):,}  ·  "
         f"🌲 {int(player['wood']):,}  ·  💎 {int(player['gems']):,}\n"
         f"⚡ Energy {state['energy']}/{ENERGY_CAP}"

@@ -124,6 +124,14 @@ async def _record_outcome(
         ),
     )
     await db.conn.commit()
+
+    # Player XP — wins pay more than losses.
+    from wagame.game.progression import grant_player_xp
+    a_xp = 100 if score_a == 1.0 else (50 if score_a == 0.5 else 25)
+    b_xp = 100 if score_a == 0.0 else (50 if score_a == 0.5 else 25)
+    await grant_player_xp(db, a_id, a_xp)
+    await grant_player_xp(db, b_id, b_xp)
+
     return change.new_a, change.new_b, change.delta_a, change.delta_b
 
 

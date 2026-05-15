@@ -250,6 +250,13 @@ async def _engage_sighting(
         await record_contribution(
             db, user_id=user_id, kind="kill_tenebrals", amount=1,
         )
+        # Player XP — sightings pay more than a regular hunt.
+        from wagame.game.progression import grant_player_xp
+        new_lv, lvls_gained, _ = await grant_player_xp(
+            db, user_id, 50 + 10 * int(row["level"])
+        )
+        summary["player_level"] = new_lv
+        summary["player_levels_gained"] = lvls_gained
 
     if killed:
         bits = [f"Slain **{spec.name} (Lv{int(row['level'])})**!"]

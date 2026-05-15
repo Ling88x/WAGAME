@@ -149,6 +149,7 @@ async def _settle(
 
     rng = random.Random(quest_id)
     paid: list[tuple[int, int, int]] = []
+    from wagame.game.progression import grant_player_xp
     for award in awards:
         await db.conn.execute(
             "UPDATE players SET gems = gems + ? WHERE discord_user_id = ?",
@@ -169,6 +170,8 @@ async def _settle(
                 )
                 shards_awarded = award.shards
         paid.append((award.user_id, award.gems, shards_awarded))
+        # Player XP for qualifying contributors (big chunk for council).
+        await grant_player_xp(db, award.user_id, 500)
 
     await db.conn.execute(
         "UPDATE council_quests SET settled = 1 WHERE id = ?", (quest_id,),

@@ -291,10 +291,24 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
                     "WHERE discord_user_id = ? AND hero_id = ?",
                     (lvl_result.new_level, lvl_result.new_xp, user_id, hero_id),
                 )
+                summary["hero_xp"] = reward.xp
                 summary["hero_level_after"] = lvl_result.new_level
                 summary["hero_levels_gained"] = lvl_result.levels_gained
         kills_today = await _bump_daily(db, user_id)
         summary["kills_today"] = kills_today
+
+        # Hunt-kill shard drop (chance-based, scales with mob level).
+        from wagame.game.progression import drop_kill_shards
+        shard_count, shard_hero_id = await drop_kill_shards(db, user_id, level)
+        if shard_count > 0:
+            summary["shards_dropped"] = shard_count
+            summary["shard_hero_id"] = shard_hero_id
+
+        # Player XP for the kill.
+        from wagame.game.progression import grant_player_xp
+        new_lv, lvls_gained, _ = await grant_player_xp(db, user_id, 10 * level)
+        summary["player_level"] = new_lv
+        summary["player_levels_gained"] = lvls_gained
     else:
         await db.conn.execute(
             "UPDATE tenebral_spawns SET hp_remaining = ? "
@@ -326,9 +340,16 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
         )
 
     if killed:
-        flash = Flash.ok(
-            f"Slain **{spec.name} (Lv{level})**! +{damage:,} dmg final blow."
-        )
+        bits = [f"Slain **{spec.name} (Lv{level})**! +{damage:,} dmg."]
+        if summary.get("hero_xp"):
+            bits.append(f"+{int(summary['hero_xp']):,} hero XP.")
+        if summary.get("shards_dropped"):
+            bits.append(f"+{summary['shards_dropped']} hero shards.")
+        if summary.get("player_levels_gained"):
+            bits.append(
+                f"📈 Player Lv {summary['player_level']} (+{summary['player_levels_gained']})."
+            )
+        flash = Flash.ok(" ".join(bits))
     else:
         pct = int(100 * (new_hp / max(1, int(spawn["hp_max"]))))
         flash = Flash.info(
@@ -381,9 +402,14 @@ async def _claim_daily(db: Database, user_id: int) -> tuple[bool, Flash]:
         db, user_id=user_id, kind="complete_dailies", amount=1,
     )
 
+    # Player XP — daily quest is a chunky reward.
+    from wagame.game.progression import grant_player_xp
+    new_lv, lvls_gained, _ = await grant_player_xp(db, user_id, 200)
+    lv_suffix = f" · 📈 Player Lv {new_lv} (+{lvls_gained})" if lvls_gained else ""
+
     return True, Flash.ok(
         f"Daily claimed: +{DAILY_QUOTA_REWARD_GEMS} gems, "
-        f"+{rss['gold']:,}/{rss['food']:,}/{rss['wood']:,} gold/food/wood."
+        f"+{rss['gold']:,}/{rss['food']:,}/{rss['wood']:,} gold/food/wood.{lv_suffix}"
     )
 
 

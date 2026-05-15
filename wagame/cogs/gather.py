@@ -395,6 +395,15 @@ class GatherView(discord.ui.View):
         msg = f"Claimed {count} march(es): " + ", ".join(parts)
         if crits:
             msg += f" — {crits} crit{'s' if crits > 1 else ''}! ✨"
+
+        # Player XP: flat 50 per claimed march so each claim feels rewarded.
+        from wagame.game.progression import grant_player_xp
+        new_lv, lvls_gained, _ = await grant_player_xp(
+            self.db, interaction.user.id, 50 * count
+        )
+        if lvls_gained:
+            msg += f" · 📈 Player Lv {new_lv} (+{lvls_gained})"
+
         await self._refresh(interaction, flash=Flash.ok(msg))
 
         # Per-hero diary DMs after the panel refreshes.

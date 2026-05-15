@@ -26,17 +26,23 @@ class ProfileCog(commands.Cog):
 
 
 def _profile_embed(user: discord.abc.User, player) -> discord.Embed:
+    from wagame.game.player_xp import title_for, xp_to_next
+    level = int(player["player_level"])
+    xp = int(player["player_xp"])
+    title = title_for(level)
+    next_at = xp_to_next(level)
     embed = discord.Embed(
         title=f"🧙 {user.display_name}'s Profile",
         color=NEUTRAL_COLOR,
+        description=f"**{title}** · Lv {level} · {xp:,}/{next_at:,} XP",
     )
     embed.set_thumbnail(url=user.display_avatar.url)
-    embed.add_field(name="Level", value=f"{player['player_level']}", inline=True)
     embed.add_field(name="Marches", value=f"{player['march_capacity']}", inline=True)
     embed.add_field(name="💎 Gems", value=f"{player['gems']:,}", inline=True)
     embed.add_field(name="Gold", value=f"{player['gold']:,}", inline=True)
     embed.add_field(name="Food", value=f"{player['food']:,}", inline=True)
     embed.add_field(name="Wood", value=f"{player['wood']:,}", inline=True)
+    embed.add_field(name="​", value="​", inline=True)
     daily = player["last_daily_claim_date"] or "never"
     diary_state = "on" if int(player["diary_dm_enabled"]) else "off"
     embed.set_footer(
