@@ -426,6 +426,7 @@ async def _render_embed(
     user: discord.abc.User,
     selected_level: int,
     selected_hero_id: int | None,
+    selected_support_hero_id: int | None = None,
 ) -> discord.Embed:
     player = await _fetch_player(db, user.id)
     energy = int(player["energy"])
@@ -437,6 +438,11 @@ async def _render_embed(
         if selected_hero_id is not None
         else None
     )
+    support_row = (
+        await _hero_by_id(db, user.id, selected_support_hero_id)
+        if selected_support_hero_id is not None
+        else None
+    )
 
     hero_atk_value = 0
     hero_speed = 0
@@ -446,12 +452,17 @@ async def _render_embed(
         hero_atk_value = atk_eff(hero_row["rarity"], hero_level)
         hero_speed = march_speed_pct(hero_level)
         hero_command = command_pct(hero_level)
-    power = march_power(
+    base_power = march_power(
         hero_atk_value,
         troops,
         troop_attack_pct=troop_attack_pct,
         hero_command_pct=hero_command,
     )
+    from wagame.cogs.bonds import bond_bonus_pct_for
+    bond_pct = await bond_bonus_pct_for(
+        db, user.id, selected_hero_id, selected_support_hero_id
+    )
+    power = int(base_power * (100 + bond_pct) / 100)
 
     spec = get_tenebral(selected_level)
     spawn = None
@@ -482,11 +493,12 @@ async def _render_embed(
 
     troops_total = sum(t.count for t in troops)
     troops_atk_sum = sum(t.attack_contribution for t in troops)
+    bond_suffix = f" · 🔗 +{bond_pct}% bond" if bond_pct else ""
     embed.add_field(
         name=f"⚔️ March Power {power:,}",
         value=(
             f"Hero {hero_atk_value:,} + Troops {troops_atk_sum:,} "
-            f"({troops_total:,} units)"
+            f"({troops_total:,} units){bond_suffix}"
         ),
         inline=False,
     )
@@ -520,6 +532,15 @@ async def _render_embed(
             bits.append(f"🏇 +{hero_speed}% speed")
         hero_line = " · ".join(bits)
     embed.add_field(name="🪄 Hero", value=hero_line, inline=False)
+
+    if support_row is not None:
+        support_line = (
+            f"**{support_row['name']}** · Lv {support_row['level']}"
+            + (f" · 🔗 bond +{bond_pct}% power" if bond_pct else " · 🔗 bond growing")
+        )
+    else:
+        support_line = "— · pick a Support hero to start a bond"
+    embed.add_field(name="🤝 Support", value=support_line, inline=False)
 
     quota_state = (
         "✓ claimed" if claimed
@@ -620,6 +641,45 @@ class HeroSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         view: HuntView = self.view  # type: ignore[assignment]
         view.selected_hero_id = int(self.values[0])
+        # Drop support if it collides with the new primary.
+        if view.selected_support_hero_id == view.selected_hero_id:
+            view.selected_support_hero_id = None
+        view._rebuild_selects()
+        await view.refresh(interaction)
+
+
+class SupportHeroSelect(discord.ui.Select):
+    """Optional second hero for bond growth + bond-tier march power buff."""
+
+    def __init__(
+        self, owned, primary_id: int | None, current: int | None,
+    ) -> None:
+        options: list[discord.SelectOption] = [
+            discord.SelectOption(
+                label="— No support —",
+                description="Solo march. No bond growth.",
+                value="none",
+                default=current is None,
+            )
+        ]
+        for row in owned[:24]:
+            hero_id = int(row["id"])
+            if hero_id == primary_id:
+                continue
+            options.append(
+                discord.SelectOption(
+                    label=f"{row['name']} · Lv {row['level']}",
+                    description=row["rarity"].capitalize(),
+                    value=str(hero_id),
+                    default=(current is not None and hero_id == current),
+                )
+            )
+        super().__init__(placeholder="Support hero (optional)", options=options, row=1)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: HuntView = self.view  # type: ignore[assignment]
+        raw = self.values[0]
+        view.selected_support_hero_id = None if raw == "none" else int(raw)
         view._rebuild_selects()
         await view.refresh(interaction)
 
@@ -631,8 +691,10 @@ class HuntView(discord.ui.View):
         self.owner_id = owner_id
         self.selected_level: int = 1
         self.selected_hero_id: int | None = None
+        self.selected_support_hero_id: int | None = None
         self._level_select: LevelSelect | None = None
         self._hero_select: HeroSelect | None = None
+        self._support_select: SupportHeroSelect | None = None
 
     async def initialize(self) -> None:
         """Pick sensible default hero (highest-rarity, highest-level owned)."""
@@ -650,8 +712,12 @@ class HuntView(discord.ui.View):
                 self.remove_item(item)
         self._level_select = LevelSelect(self.selected_level)
         self._hero_select = HeroSelect(owned, self.selected_hero_id)
+        self._support_select = SupportHeroSelect(
+            owned, self.selected_hero_id, self.selected_support_hero_id,
+        )
         self.add_item(self._level_select)
         self.add_item(self._hero_select)
+        self.add_item(self._support_select)
 
     def _rebuild_selects(self) -> None:
         # Sync select defaults; called when level/hero changes via dropdown.
@@ -686,7 +752,8 @@ class HuntView(discord.ui.View):
             self.selected_hero_id = int(owned[0]["id"]) if owned else None
         await self._build(owned)
         embed = await _render_embed(
-            self.db, interaction.user, self.selected_level, self.selected_hero_id
+            self.db, interaction.user, self.selected_level,
+            self.selected_hero_id, self.selected_support_hero_id,
         )
         apply_flash(embed, flash)
         if interaction.response.is_done():
@@ -725,12 +792,17 @@ class HuntView(discord.ui.View):
         hero_atk_value = atk_eff(hero_row["rarity"], hero_level)
         hero_speed = march_speed_pct(hero_level)
         hero_command = command_pct(hero_level)
-        power = march_power(
+        base_power = march_power(
             hero_atk_value,
             troops,
             troop_attack_pct=int(player["troop_attack_pct"]),
             hero_command_pct=hero_command,
         )
+        from wagame.cogs.bonds import bond_bonus_pct_for
+        bond_pct = await bond_bonus_pct_for(
+            self.db, interaction.user.id, hero_id, self.selected_support_hero_id,
+        )
+        power = int(base_power * (100 + bond_pct) / 100)
         min_power = min_power_for_level(level)
         if power < min_power:
             await self.refresh(
@@ -792,6 +864,13 @@ class HuntView(discord.ui.View):
                 "level": level,
             },
         )
+
+        # Hero Bond: credit pair points if support hero was set.
+        from wagame.cogs.bonds import record_bond
+        await record_bond(
+            self.db, interaction.user.id, hero_id, self.selected_support_hero_id,
+            killed=bool(summary.get("killed")),
+        )
         if summary.get("hero_levels_gained"):
             await try_send_diary(
                 interaction.client,  # type: ignore[arg-type]
@@ -849,7 +928,8 @@ class HuntCog(commands.Cog):
         view = HuntView(self.db, interaction.user.id)
         await view.initialize()
         embed = await _render_embed(
-            self.db, interaction.user, view.selected_level, view.selected_hero_id
+            self.db, interaction.user, view.selected_level,
+            view.selected_hero_id, view.selected_support_hero_id,
         )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 

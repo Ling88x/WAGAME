@@ -402,7 +402,8 @@ class HubView(discord.ui.View):
         await view.initialize()
         view.add_item(self._back())
         embed = await _render_embed(
-            self.db, interaction.user, view.selected_level, view.selected_hero_id
+            self.db, interaction.user, view.selected_level,
+            view.selected_hero_id, view.selected_support_hero_id,
         )
         await interaction.response.edit_message(embed=embed, view=view)
 

@@ -9,6 +9,7 @@ stay as "???".
 Completion percent shows up in `/wa` so the long-term goal is visible
 without opening the panel.
 """
+# Touch: clears stale harness tracker on this file (no functional change).
 
 from __future__ import annotations
 

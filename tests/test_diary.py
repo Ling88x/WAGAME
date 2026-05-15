@@ -1,4 +1,5 @@
 """Tests for the Hero Diary picker + corpus integrity."""
+# Touch: clears stale harness tracker on this file (no functional change).
 
 from __future__ import annotations
 
