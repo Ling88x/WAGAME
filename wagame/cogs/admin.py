@@ -438,6 +438,77 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
         )
 
     @app_commands.command(
+        name="set-arena-channel",
+        description="Configure the Ghost Arena channel for this server.",
+    )
+    @app_commands.describe(channel="Channel where 12h match recaps will post.")
+    @app_commands.check(_is_bot_owner)
+    async def set_arena_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "Run this inside a server.", ephemeral=True
+            )
+            return
+        await self.db.conn.execute(
+            """
+            INSERT INTO arena_configs (guild_id, channel_id, enabled)
+            VALUES (?, ?, 1)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                channel_id = excluded.channel_id, enabled = 1
+            """,
+            (interaction.guild_id, channel.id),
+        )
+        await self.db.conn.commit()
+        await interaction.response.send_message(
+            f"Ghost Arena channel set to {channel.mention}. "
+            "Matches will start posting on the next 12h tick.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="trigger-arena",
+        description="Force the Ghost Arena loop to fire now (owner only).",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def trigger_arena(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "Run this inside a server.", ephemeral=True
+            )
+            return
+        async with self.db.conn.execute(
+            "SELECT channel_id FROM arena_configs WHERE guild_id = ?",
+            (interaction.guild_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            await interaction.response.send_message(
+                "No arena channel configured. Use `/admin set-arena-channel` first.",
+                ephemeral=True,
+            )
+            return
+        from wagame.cogs.arena import run_arena_match
+        match_id = await run_arena_match(
+            interaction.client,  # type: ignore[arg-type]
+            self.db,
+            guild_id=interaction.guild_id,
+            channel_id=int(row["channel_id"]),
+        )
+        if match_id is None:
+            await interaction.response.send_message(
+                "Couldn't draft a pair — need ≥2 enrolled players with heroes.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            f"Match #{match_id} posted.", ephemeral=True
+        )
+
+    @app_commands.command(
         name="simulate-combat",
         description="Run the auto-battler between two players and post the log.",
     )
