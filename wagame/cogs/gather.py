@@ -398,6 +398,7 @@ class GatherView(discord.ui.View):
         await self._refresh(interaction, flash=Flash.ok(msg))
 
         # Per-hero diary DMs after the panel refreshes.
+        from wagame.cogs.council import record_contribution as council_record
         from wagame.cogs.diary import try_send_diary
         for hero_id, resource, amount in per_march:
             await try_send_diary(
@@ -407,6 +408,14 @@ class GatherView(discord.ui.View):
                 hero_id=hero_id,
                 event="gather_claim",
                 context={"rss": f"{amount:,} {resource}"},
+            )
+            # Council quest contribution: every gathered unit of RSS
+            # ticks the "gather_rss" quest if one is active.
+            await council_record(
+                self.db,
+                user_id=interaction.user.id,
+                kind="gather_rss",
+                amount=amount,
             )
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, row=1)

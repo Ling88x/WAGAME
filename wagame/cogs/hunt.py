@@ -318,6 +318,13 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
         killed=killed,
     )
 
+    # Council quest: each kill ticks the tenebral-slay quest if active.
+    if killed:
+        from wagame.cogs.council import record_contribution
+        await record_contribution(
+            db, user_id=user_id, kind="kill_tenebrals", amount=1,
+        )
+
     if killed:
         flash = Flash.ok(
             f"Slain **{spec.name} (Lv{level})**! +{damage:,} dmg final blow."
@@ -367,6 +374,13 @@ async def _claim_daily(db: Database, user_id: int) -> tuple[bool, Flash]:
         (user_id, current_reset_day().isoformat()),
     )
     await db.conn.commit()
+
+    # Council quest: +1 toward the "complete_dailies" pool.
+    from wagame.cogs.council import record_contribution as council_record
+    await council_record(
+        db, user_id=user_id, kind="complete_dailies", amount=1,
+    )
+
     return True, Flash.ok(
         f"Daily claimed: +{DAILY_QUOTA_REWARD_GEMS} gems, "
         f"+{rss['gold']:,}/{rss['food']:,}/{rss['wood']:,} gold/food/wood."

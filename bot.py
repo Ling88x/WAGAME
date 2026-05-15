@@ -28,6 +28,7 @@ INITIAL_COGS = (
     "wagame.cogs.bestiary",
     "wagame.cogs.vault",
     "wagame.cogs.arena",
+    "wagame.cogs.council",
     "wagame.cogs.hub",
 )
 

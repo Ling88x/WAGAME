@@ -102,6 +102,21 @@ async def _hub_state(db: Database, user_id: int) -> dict:
     ) as cur:
         bestiary_row = await cur.fetchone()
 
+    async with db.conn.execute(
+        "SELECT id, kind, target, progress, ends_at FROM council_quests "
+        "WHERE settled = 0 ORDER BY started_at DESC LIMIT 1"
+    ) as cur:
+        council_quest = await cur.fetchone()
+    council_user_amount = 0
+    if council_quest is not None:
+        async with db.conn.execute(
+            "SELECT amount FROM council_contributions "
+            "WHERE quest_id = ? AND user_id = ?",
+            (int(council_quest["id"]), user_id),
+        ) as cur:
+            cu = await cur.fetchone()
+        council_user_amount = int(cu["amount"]) if cu else 0
+
     today_iso = current_reset_day().isoformat()
     vault_opened_today = (player["last_vault_open_date"] == today_iso)
 
@@ -121,6 +136,8 @@ async def _hub_state(db: Database, user_id: int) -> dict:
         "bestiary_documented": int(bestiary_row["n"] or 0),
         "vault_streak": int(player["vault_streak"] or 0),
         "vault_opened_today": vault_opened_today,
+        "council_quest": council_quest,
+        "council_user_amount": council_user_amount,
     }
 
 
@@ -196,6 +213,23 @@ def _vault_line(state: dict) -> str:
     return f"🔥 Streak {streak} · **ready to open**"
 
 
+def _council_line(state: dict) -> str | None:
+    quest = state["council_quest"]
+    if quest is None:
+        return None
+    from wagame.game.council import describe, unit_label
+    kind = quest["kind"]
+    target = int(quest["target"])
+    progress = int(quest["progress"])
+    pct = int(100 * progress / max(1, target))
+    your = state["council_user_amount"]
+    return (
+        f"🏛 **{describe(kind)}** · {progress:,}/{target:,} "
+        f"{unit_label(kind)} ({pct}%) · you: {your:,}\n"
+        f"Ends <t:{int(quest['ends_at'])}:R>"
+    )
+
+
 def _sighting_line(state: dict) -> str | None:
     """Active Tenebral Sighting summary line, or None when no sighting."""
     row = state["sighting"]
@@ -231,6 +265,10 @@ async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embe
     sighting_line = _sighting_line(state)
     if sighting_line:
         embed.add_field(name="🌙 Sighting", value=sighting_line, inline=False)
+
+    council_line = _council_line(state)
+    if council_line:
+        embed.add_field(name="🏛 Council", value=council_line, inline=False)
 
     embed.add_field(name="🦌 Hunt", value=_hunt_line(state), inline=False)
     embed.add_field(name="⛏️ Gathering", value=_gather_line(state), inline=False)
@@ -482,6 +520,16 @@ class HubView(discord.ui.View):
         view = VaultView(self.db, self.owner_id)
         view.add_item(self._back())
         embed = await render_embed(self.db, interaction.user)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Council", emoji="🏛", style=discord.ButtonStyle.secondary, row=2)
+    async def open_council(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        from wagame.cogs.council import CouncilView, _render_council_embed
+        view = CouncilView(self.db, self.owner_id)
+        view.add_item(self._back())
+        embed = await _render_council_embed(self.db, interaction.user)
         await interaction.response.edit_message(embed=embed, view=view)
 
     @discord.ui.button(label="Sighting", emoji="🌙", style=discord.ButtonStyle.secondary, row=2)

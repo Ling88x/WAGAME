@@ -438,6 +438,56 @@ class AdminCog(commands.GroupCog, group_name="admin", group_description="Admin t
         )
 
     @app_commands.command(
+        name="set-council-channel",
+        description="Configure the Witch's Council channel for this server.",
+    )
+    @app_commands.describe(channel="Channel where quest announcements post.")
+    @app_commands.check(_is_bot_owner)
+    async def set_council_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "Run this inside a server.", ephemeral=True
+            )
+            return
+        await self.db.conn.execute(
+            """
+            INSERT INTO council_configs (guild_id, channel_id, enabled)
+            VALUES (?, ?, 1)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                channel_id = excluded.channel_id, enabled = 1
+            """,
+            (interaction.guild_id, channel.id),
+        )
+        await self.db.conn.commit()
+        await interaction.response.send_message(
+            f"Council channel set to {channel.mention}. "
+            "Quest spawn / payout announcements will post here.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="trigger-council",
+        description="Force the Council loop to tick now (owner only).",
+    )
+    @app_commands.check(_is_bot_owner)
+    async def trigger_council(self, interaction: discord.Interaction) -> None:
+        from wagame.cogs.council import CouncilCog
+        cog: CouncilCog | None = interaction.client.get_cog("CouncilCog")  # type: ignore[assignment]
+        if cog is None:
+            await interaction.response.send_message(
+                "Council cog not loaded.", ephemeral=True
+            )
+            return
+        await cog._tick()
+        await interaction.response.send_message(
+            "Council tick fired.", ephemeral=True
+        )
+
+    @app_commands.command(
         name="set-arena-channel",
         description="Configure the Ghost Arena channel for this server.",
     )

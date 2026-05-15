@@ -244,6 +244,13 @@ async def _engage_sighting(
         killed=killed,
     )
 
+    # Council: sighting kills also tick the tenebral-slay quest.
+    if killed:
+        from wagame.cogs.council import record_contribution
+        await record_contribution(
+            db, user_id=user_id, kind="kill_tenebrals", amount=1,
+        )
+
     if killed:
         bits = [f"Slain **{spec.name} (Lv{int(row['level'])})**!"]
         bits.append(f"+{summary['bonus_rss']:,} RSS (split).")
