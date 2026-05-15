@@ -9,6 +9,7 @@ import pytest
 
 from wagame.cogs.hunt import (
     _bump_daily,
+    _busy_hero_ids,
     _claim_daily,
     _daily_row,
     _engage_march,
@@ -113,14 +114,22 @@ async def _grant_troops(db: Database, user_id: int, codename: str, count: int) -
     await db.conn.commit()
 
 
-async def _insert_march(db: Database, user_id: int, level: int, hero_id: int, damage: int) -> int:
+async def _insert_march(
+    db: Database,
+    user_id: int,
+    level: int,
+    hero_id: int,
+    damage: int,
+    support_hero_id: int | None = None,
+) -> int:
     async with db.conn.execute(
         """
         INSERT INTO hunt_marches
-          (discord_user_id, level, hero_id, started_at, completes_at, damage)
-        VALUES (?, ?, ?, 0, 0, ?)
+          (discord_user_id, level, hero_id, support_hero_id,
+           started_at, completes_at, damage)
+        VALUES (?, ?, ?, ?, 0, 0, ?)
         """,
-        (user_id, level, hero_id, damage),
+        (user_id, level, hero_id, support_hero_id, damage),
     ) as cur:
         return int(cur.lastrowid)
 
@@ -278,6 +287,96 @@ async def test_fetch_troops_skips_empty_stacks(db: Database) -> None:
     codenames = {s.codename for s in stacks}
     assert "catsith" in codenames
     assert "gryphon" not in codenames
+
+
+async def test_busy_hero_ids_includes_support_slot(db: Database) -> None:
+    await db.get_or_create_player(1)
+    primary = await _grant_hero(db, 1, "ghostpink", level=5)
+    support = await _grant_hero(db, 1, "mapmaker", level=3)
+
+    march_id = await _insert_march(
+        db, 1, level=1, hero_id=primary, damage=1, support_hero_id=support,
+    )
+    busy = await _busy_hero_ids(db, 1)
+    assert primary in busy
+    assert support in busy
+
+    await _finalize_march(db, march_id)
+    busy_after = await _busy_hero_ids(db, 1)
+    assert primary not in busy_after
+    assert support not in busy_after
+
+
+# -- support hero / bond ---------------------------------------------------
+
+
+async def test_chip_engagement_credits_bond_points(db: Database) -> None:
+    await db.get_or_create_player(1)
+    primary = await _grant_hero(db, 1, "ghostpink", level=5)
+    support = await _grant_hero(db, 1, "mapmaker", level=3)
+
+    march_id = await _insert_march(
+        db, 1, level=3, hero_id=primary, damage=1, support_hero_id=support,
+    )
+    _, summary = await _resolve_march(db, march_id)
+    assert summary["killed"] is False
+    assert summary.get("bond_points", 0) >= 1
+
+    a, b = sorted((primary, support))
+    async with db.conn.execute(
+        "SELECT points FROM hero_bonds "
+        "WHERE discord_user_id = ? AND hero_a_id = ? AND hero_b_id = ?",
+        (1, a, b),
+    ) as cur:
+        bond_row = await cur.fetchone()
+    assert bond_row is not None
+    assert int(bond_row["points"]) >= 1
+
+
+async def test_kill_with_support_awards_xp_to_both(db: Database) -> None:
+    await db.get_or_create_player(1)
+    primary = await _grant_hero(db, 1, "ghostpink", level=1)
+    support = await _grant_hero(db, 1, "mapmaker", level=1)
+
+    spec = get_tenebral(1)
+    march_id = await _insert_march(
+        db, 1, level=1, hero_id=primary, damage=spec.hp * 10,
+        support_hero_id=support,
+    )
+    _, summary = await _resolve_march(db, march_id)
+    assert summary["killed"] is True
+    assert summary.get("hero_xp") == spec.reward_xp
+    assert summary.get("support_xp") == spec.reward_xp
+    assert summary.get("bond_points", 0) >= 3
+
+    # Both heroes leveled up off the lv1 kill.
+    async with db.conn.execute(
+        "SELECT hero_id, level FROM owned_heroes WHERE discord_user_id = 1"
+    ) as cur:
+        rows = await cur.fetchall()
+    levels = {int(r["hero_id"]): int(r["level"]) for r in rows}
+    assert levels[primary] >= 2
+    assert levels[support] >= 2
+
+
+async def test_support_hero_none_keeps_solo_flow(db: Database) -> None:
+    """No support → no bond row, no support_xp, behaviour unchanged."""
+    await db.get_or_create_player(1)
+    primary = await _grant_hero(db, 1, "ghostpink", level=1)
+    spec = get_tenebral(1)
+    march_id = await _insert_march(
+        db, 1, level=1, hero_id=primary, damage=spec.hp * 10,
+    )
+    _, summary = await _resolve_march(db, march_id)
+    assert summary["killed"] is True
+    assert "support_xp" not in summary
+    assert "bond_points" not in summary
+
+    async with db.conn.execute(
+        "SELECT COUNT(*) AS n FROM hero_bonds WHERE discord_user_id = 1"
+    ) as cur:
+        n = int((await cur.fetchone())["n"])
+    assert n == 0
 
 
 async def test_fetch_owned_heroes_sorted_by_rarity(db: Database) -> None:

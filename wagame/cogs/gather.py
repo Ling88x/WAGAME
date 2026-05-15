@@ -89,7 +89,7 @@ async def _fetch_owned_heroes(db: Database, user_id: int):
 
 
 async def _busy_hero_ids(db: Database, user_id: int) -> set[int]:
-    """Heroes locked in an active gather or hunt march."""
+    """Heroes locked in an active gather or hunt march (primary or support)."""
     busy: set[int] = set()
     async with db.conn.execute(
         "SELECT DISTINCT hero_id FROM marches "
@@ -99,12 +99,15 @@ async def _busy_hero_ids(db: Database, user_id: int) -> set[int]:
         for row in await cur.fetchall():
             busy.add(int(row["hero_id"]))
     async with db.conn.execute(
-        "SELECT DISTINCT hero_id FROM hunt_marches "
-        "WHERE discord_user_id = ? AND resolved = 0 AND hero_id IS NOT NULL",
+        "SELECT hero_id, support_hero_id FROM hunt_marches "
+        "WHERE discord_user_id = ? AND resolved = 0",
         (user_id,),
     ) as cur:
         for row in await cur.fetchall():
-            busy.add(int(row["hero_id"]))
+            if row["hero_id"] is not None:
+                busy.add(int(row["hero_id"]))
+            if row["support_hero_id"] is not None:
+                busy.add(int(row["support_hero_id"]))
     return busy
 
 

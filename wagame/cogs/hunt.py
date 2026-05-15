@@ -27,6 +27,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from wagame.db import Database
+from wagame.game.bonds import canonical_pair, tier_for
 from wagame.game.daily import current_reset_day
 from wagame.game.hero_levels import (
     apply_xp_gain,
@@ -52,6 +53,11 @@ from wagame.game.hunt import (
     regen_energy,
 )
 from wagame.ui import NEUTRAL_COLOR, Flash, apply_flash
+
+# Support hero contribution scaling — 25% of atk_eff, 50% of leadership
+# buffs (command/speed). Primary still leads, support is the wingman.
+SUPPORT_ATK_FRACTION = 0.25
+SUPPORT_BUFF_FRACTION = 0.50
 
 # -- DB helpers -----------------------------------------------------------
 
@@ -93,6 +99,54 @@ async def _active_march(db: Database, user_id: int):
         (user_id,),
     ) as cur:
         return await cur.fetchone()
+
+
+async def _busy_hero_ids(db: Database, user_id: int) -> set[int]:
+    """Heroes locked in an active gather or hunt march (primary or support)."""
+    busy: set[int] = set()
+    async with db.conn.execute(
+        "SELECT DISTINCT hero_id FROM marches "
+        "WHERE discord_user_id = ? AND hero_id IS NOT NULL",
+        (user_id,),
+    ) as cur:
+        for row in await cur.fetchall():
+            busy.add(int(row["hero_id"]))
+    async with db.conn.execute(
+        "SELECT hero_id, support_hero_id FROM hunt_marches "
+        "WHERE discord_user_id = ? AND resolved = 0",
+        (user_id,),
+    ) as cur:
+        for row in await cur.fetchall():
+            if row["hero_id"] is not None:
+                busy.add(int(row["hero_id"]))
+            if row["support_hero_id"] is not None:
+                busy.add(int(row["support_hero_id"]))
+    return busy
+
+
+async def _bond_state(
+    db: Database,
+    user_id: int,
+    primary_hero_id: int | None,
+    support_hero_id: int | None,
+) -> tuple[int, int, int]:
+    """Return `(points, level, bonus_pct)` for the active pair, or zeros."""
+    if (
+        primary_hero_id is None
+        or support_hero_id is None
+        or primary_hero_id == support_hero_id
+    ):
+        return 0, 0, 0
+    a, b = canonical_pair(primary_hero_id, support_hero_id)
+    async with db.conn.execute(
+        "SELECT points FROM hero_bonds "
+        "WHERE discord_user_id = ? AND hero_a_id = ? AND hero_b_id = ?",
+        (user_id, a, b),
+    ) as cur:
+        row = await cur.fetchone()
+    points = int(row["points"]) if row else 0
+    tier = tier_for(points)
+    return points, tier.level, tier.bonus_pct
 
 
 async def _fetch_player(db: Database, user_id: int):
@@ -227,6 +281,25 @@ async def _bump_daily(db: Database, user_id: int) -> int:
     return int(row["kills"])
 
 
+async def _grant_hero_xp(db: Database, user_id: int, hero_id: int, gained: int):
+    """Cascade XP onto an owned hero, persist, return the LevelUpResult or None."""
+    async with db.conn.execute(
+        "SELECT level, xp FROM owned_heroes "
+        "WHERE discord_user_id = ? AND hero_id = ?",
+        (user_id, hero_id),
+    ) as cur:
+        row = await cur.fetchone()
+    if row is None:
+        return None
+    result = apply_xp_gain(int(row["level"]), int(row["xp"]), gained)
+    await db.conn.execute(
+        "UPDATE owned_heroes SET level = ?, xp = ? "
+        "WHERE discord_user_id = ? AND hero_id = ?",
+        (result.new_level, result.new_xp, user_id, hero_id),
+    )
+    return result
+
+
 async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
     """Outbound leg complete: apply damage, award rewards if killed, set engaged_at.
 
@@ -247,6 +320,7 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
     level = int(march["level"])
     damage = int(march["damage"])
     hero_id = march["hero_id"]
+    support_hero_id = march["support_hero_id"]
 
     spawn = await _spawn_or_get(db, user_id, level)
     spec = get_tenebral(level)
@@ -261,6 +335,7 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
         "hp_after": new_hp,
         "hp_max": int(spawn["hp_max"]),
         "tenebral_name": spec.name,
+        "support_hero_id": int(support_hero_id) if support_hero_id is not None else None,
     }
 
     if killed:
@@ -276,24 +351,19 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
             (reward.gold, reward.food, reward.wood, user_id),
         )
         if hero_id is not None:
-            async with db.conn.execute(
-                "SELECT level, xp FROM owned_heroes "
-                "WHERE discord_user_id = ? AND hero_id = ?",
-                (user_id, hero_id),
-            ) as cur:
-                hero_row = await cur.fetchone()
-            if hero_row is not None:
-                lvl_result = apply_xp_gain(
-                    int(hero_row["level"]), int(hero_row["xp"]), reward.xp
-                )
-                await db.conn.execute(
-                    "UPDATE owned_heroes SET level = ?, xp = ? "
-                    "WHERE discord_user_id = ? AND hero_id = ?",
-                    (lvl_result.new_level, lvl_result.new_xp, user_id, hero_id),
-                )
+            lvl_result = await _grant_hero_xp(db, user_id, int(hero_id), reward.xp)
+            if lvl_result is not None:
                 summary["hero_xp"] = reward.xp
                 summary["hero_level_after"] = lvl_result.new_level
                 summary["hero_levels_gained"] = lvl_result.levels_gained
+        if support_hero_id is not None:
+            support_result = await _grant_hero_xp(
+                db, user_id, int(support_hero_id), reward.xp,
+            )
+            if support_result is not None:
+                summary["support_xp"] = reward.xp
+                summary["support_level_after"] = support_result.new_level
+                summary["support_levels_gained"] = support_result.levels_gained
         kills_today = await _bump_daily(db, user_id)
         summary["kills_today"] = kills_today
 
@@ -339,12 +409,29 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
             db, user_id=user_id, kind="kill_tenebrals", amount=1,
         )
 
+    # Hero Bonds: every engagement with a support hero credits points.
+    if support_hero_id is not None and hero_id is not None:
+        from wagame.cogs.bonds import record_bond
+        bond_points = await record_bond(
+            db, user_id,
+            int(hero_id), int(support_hero_id),
+            killed=killed,
+        )
+        if bond_points > 0:
+            summary["bond_points"] = bond_points
+
     if killed:
         bits = [f"Slain **{spec.name} (Lv{level})**! +{damage:,} dmg."]
         if summary.get("hero_xp"):
-            bits.append(f"+{int(summary['hero_xp']):,} hero XP.")
+            xp_amt = int(summary["hero_xp"])
+            if summary.get("support_xp"):
+                bits.append(f"+{xp_amt:,} hero XP each (x2).")
+            else:
+                bits.append(f"+{xp_amt:,} hero XP.")
         if summary.get("shards_dropped"):
             bits.append(f"+{summary['shards_dropped']} hero shards.")
+        if summary.get("bond_points"):
+            bits.append(f"🔗 +{summary['bond_points']} bond pts.")
         if summary.get("player_levels_gained"):
             bits.append(
                 f"📈 Player Lv {summary['player_level']} (+{summary['player_levels_gained']})."
@@ -352,9 +439,10 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
         flash = Flash.ok(" ".join(bits))
     else:
         pct = int(100 * (new_hp / max(1, int(spawn["hp_max"]))))
-        flash = Flash.info(
-            f"{spec.name} (Lv{level}) took {damage:,} dmg — {pct}% HP left."
-        )
+        msg = f"{spec.name} (Lv{level}) took {damage:,} dmg — {pct}% HP left."
+        if summary.get("bond_points"):
+            msg += f" 🔗 +{summary['bond_points']} bond pts."
+        flash = Flash.info(msg)
     return flash, summary
 
 
@@ -426,6 +514,7 @@ async def _render_embed(
     user: discord.abc.User,
     selected_level: int,
     selected_hero_id: int | None,
+    selected_support_hero_id: int | None = None,
 ) -> discord.Embed:
     player = await _fetch_player(db, user.id)
     energy = int(player["energy"])
@@ -437,6 +526,12 @@ async def _render_embed(
         if selected_hero_id is not None
         else None
     )
+    support_row = (
+        await _hero_by_id(db, user.id, selected_support_hero_id)
+        if selected_support_hero_id is not None
+        and selected_support_hero_id != selected_hero_id
+        else None
+    )
 
     hero_atk_value = 0
     hero_speed = 0
@@ -446,12 +541,31 @@ async def _render_embed(
         hero_atk_value = atk_eff(hero_row["rarity"], hero_level)
         hero_speed = march_speed_pct(hero_level)
         hero_command = command_pct(hero_level)
-    power = march_power(
-        hero_atk_value,
+
+    support_atk_value = 0
+    support_speed = 0
+    support_command = 0
+    if support_row is not None:
+        support_level = int(support_row["level"])
+        support_atk_value = atk_eff(support_row["rarity"], support_level)
+        support_speed = march_speed_pct(support_level)
+        support_command = command_pct(support_level)
+
+    support_atk_contrib = int(support_atk_value * SUPPORT_ATK_FRACTION)
+    support_command_contrib = int(support_command * SUPPORT_BUFF_FRACTION)
+    support_speed_contrib = int(support_speed * SUPPORT_BUFF_FRACTION)
+
+    _, bond_level, bond_bonus_pct = await _bond_state(
+        db, user.id, selected_hero_id, selected_support_hero_id,
+    )
+
+    base_power = march_power(
+        hero_atk_value + support_atk_contrib,
         troops,
         troop_attack_pct=troop_attack_pct,
-        hero_command_pct=hero_command,
+        hero_command_pct=hero_command + support_command_contrib,
     )
+    power = int(base_power * (100 + bond_bonus_pct) / 100)
 
     spec = get_tenebral(selected_level)
     spawn = None
@@ -482,12 +596,15 @@ async def _render_embed(
 
     troops_total = sum(t.count for t in troops)
     troops_atk_sum = sum(t.attack_contribution for t in troops)
+    power_breakdown = f"Hero {hero_atk_value:,} + Troops {troops_atk_sum:,}"
+    if support_atk_contrib:
+        power_breakdown += f" + Support {support_atk_contrib:,}"
+    power_breakdown += f" ({troops_total:,} units)"
+    if bond_bonus_pct:
+        power_breakdown += f"\n🔗 Bond Lv{bond_level} multiplier +{bond_bonus_pct}%"
     embed.add_field(
         name=f"⚔️ March Power {power:,}",
-        value=(
-            f"Hero {hero_atk_value:,} + Troops {troops_atk_sum:,} "
-            f"({troops_total:,} units)"
-        ),
+        value=power_breakdown,
         inline=False,
     )
 
@@ -519,7 +636,35 @@ async def _render_embed(
         if hero_speed:
             bits.append(f"🏇 +{hero_speed}% speed")
         hero_line = " · ".join(bits)
-    embed.add_field(name="🪄 Hero", value=hero_line, inline=False)
+    embed.add_field(name="🪄 Primary", value=hero_line, inline=False)
+
+    if support_row is not None:
+        bits = [
+            f"**{support_row['name']}**",
+            f"Lv {support_row['level']}",
+            f"⚔️ {support_atk_contrib:,} atk ({int(SUPPORT_ATK_FRACTION * 100)}%)",
+        ]
+        if support_command_contrib:
+            bits.append(f"💪 +{support_command_contrib}% power")
+        if support_speed_contrib:
+            bits.append(f"🏇 +{support_speed_contrib}% speed")
+        support_line = " · ".join(bits)
+    else:
+        support_line = "**(none)** — pick a second hero to build a bond."
+    embed.add_field(name="🤝 Support", value=support_line, inline=False)
+
+    if hero_row is not None and support_row is not None:
+        bond_points, _, _ = await _bond_state(
+            db, user.id, selected_hero_id, selected_support_hero_id,
+        )
+        if bond_level > 0:
+            bond_line = (
+                f"Lv{bond_level} · +{bond_bonus_pct}% march power · "
+                f"{bond_points:,} pts"
+            )
+        else:
+            bond_line = f"Building… {bond_points:,} pts (Lv1 unlocks at 10)"
+        embed.add_field(name="🔗 Bond", value=bond_line, inline=False)
 
     quota_state = (
         "✓ claimed" if claimed
@@ -615,11 +760,67 @@ class HeroSelect(discord.ui.Select):
                     default=(current is not None and int(row["id"]) == current),
                 )
             )
-        super().__init__(placeholder="March hero", options=options, row=3)
+        super().__init__(placeholder="Primary hero", options=options, row=3)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view: HuntView = self.view  # type: ignore[assignment]
         view.selected_hero_id = int(self.values[0])
+        # Picked-primary blocks support — drop a colliding support pick.
+        if view.selected_support_hero_id == view.selected_hero_id:
+            view.selected_support_hero_id = None
+        view._rebuild_selects()
+        await view.refresh(interaction)
+
+
+SUPPORT_NONE_VALUE = "none"
+
+
+class SupportHeroSelect(discord.ui.Select):
+    def __init__(
+        self,
+        owned,
+        primary_id: int | None,
+        busy: set[int],
+        current: int | None,
+    ) -> None:
+        options: list[discord.SelectOption] = [
+            discord.SelectOption(
+                label="(no support)",
+                description="Solo march — primary fights alone.",
+                value=SUPPORT_NONE_VALUE,
+                default=(current is None),
+            )
+        ]
+        for row in owned:
+            hero_id = int(row["id"])
+            if hero_id == primary_id:
+                continue
+            if hero_id in busy:
+                continue
+            options.append(
+                discord.SelectOption(
+                    label=f"{row['name']} · Lv {row['level']}",
+                    description=row["rarity"].capitalize(),
+                    value=str(hero_id),
+                    default=(current is not None and hero_id == current),
+                )
+            )
+            if len(options) >= 25:
+                break
+        disabled = len(options) == 1  # Only the "(no support)" entry.
+        super().__init__(
+            placeholder="Support hero (builds bonds)",
+            options=options,
+            row=4,
+            disabled=disabled,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: HuntView = self.view  # type: ignore[assignment]
+        raw = self.values[0]
+        view.selected_support_hero_id = (
+            None if raw == SUPPORT_NONE_VALUE else int(raw)
+        )
         view._rebuild_selects()
         await view.refresh(interaction)
 
@@ -631,8 +832,10 @@ class HuntView(discord.ui.View):
         self.owner_id = owner_id
         self.selected_level: int = 1
         self.selected_hero_id: int | None = None
+        self.selected_support_hero_id: int | None = None
         self._level_select: LevelSelect | None = None
         self._hero_select: HeroSelect | None = None
+        self._support_select: SupportHeroSelect | None = None
 
     async def initialize(self) -> None:
         """Pick sensible default hero (highest-rarity, highest-level owned)."""
@@ -644,14 +847,19 @@ class HuntView(discord.ui.View):
     async def _build(self, owned=None) -> None:
         if owned is None:
             owned = await _fetch_owned_heroes(self.db, self.owner_id)
+        busy = await _busy_hero_ids(self.db, self.owner_id)
         # Remove any existing selects so we don't double them on refresh.
         for item in list(self.children):
             if isinstance(item, discord.ui.Select):
                 self.remove_item(item)
         self._level_select = LevelSelect(self.selected_level)
         self._hero_select = HeroSelect(owned, self.selected_hero_id)
+        self._support_select = SupportHeroSelect(
+            owned, self.selected_hero_id, busy, self.selected_support_hero_id,
+        )
         self.add_item(self._level_select)
         self.add_item(self._hero_select)
+        self.add_item(self._support_select)
 
     def _rebuild_selects(self) -> None:
         # Sync select defaults; called when level/hero changes via dropdown.
@@ -679,14 +887,24 @@ class HuntView(discord.ui.View):
     ) -> None:
         # Re-fetch heroes so admin grants mid-session surface.
         owned = await _fetch_owned_heroes(self.db, self.owner_id)
+        owned_ids = {int(r["id"]) for r in owned}
         if (
             self.selected_hero_id is not None
-            and not any(int(r["id"]) == self.selected_hero_id for r in owned)
+            and self.selected_hero_id not in owned_ids
         ):
             self.selected_hero_id = int(owned[0]["id"]) if owned else None
+        if (
+            self.selected_support_hero_id is not None
+            and (
+                self.selected_support_hero_id not in owned_ids
+                or self.selected_support_hero_id == self.selected_hero_id
+            )
+        ):
+            self.selected_support_hero_id = None
         await self._build(owned)
         embed = await _render_embed(
-            self.db, interaction.user, self.selected_level, self.selected_hero_id
+            self.db, interaction.user, self.selected_level,
+            self.selected_hero_id, self.selected_support_hero_id,
         )
         apply_flash(embed, flash)
         if interaction.response.is_done():
@@ -699,6 +917,11 @@ class HuntView(discord.ui.View):
         # Snapshot state before doing async work; users can fire double-clicks.
         level = self.selected_level
         hero_id = self.selected_hero_id
+        support_hero_id = self.selected_support_hero_id
+        if support_hero_id is not None and support_hero_id == hero_id:
+            # Defensive: SupportSelect filters this out, but reset anyway.
+            support_hero_id = None
+            self.selected_support_hero_id = None
 
         if hero_id is None:
             await self.refresh(
@@ -711,6 +934,18 @@ class HuntView(discord.ui.View):
             await self.refresh(interaction, flash=Flash.err("A march is already in flight."))
             return
 
+        if support_hero_id is not None:
+            busy = await _busy_hero_ids(self.db, interaction.user.id)
+            if support_hero_id in busy:
+                self.selected_support_hero_id = None
+                await self.refresh(
+                    interaction,
+                    flash=Flash.err(
+                        "Support hero is locked in another march — picked one was dropped."
+                    ),
+                )
+                return
+
         spec = get_tenebral(level)
         hero_row = await _hero_by_id(self.db, interaction.user.id, hero_id)
         if hero_row is None:
@@ -719,18 +954,46 @@ class HuntView(discord.ui.View):
             )
             return
 
+        support_row = (
+            await _hero_by_id(self.db, interaction.user.id, support_hero_id)
+            if support_hero_id is not None
+            else None
+        )
+
         troops = await _fetch_troops(self.db, interaction.user.id)
         player = await _fetch_player(self.db, interaction.user.id)
         hero_level = int(hero_row["level"])
         hero_atk_value = atk_eff(hero_row["rarity"], hero_level)
         hero_speed = march_speed_pct(hero_level)
         hero_command = command_pct(hero_level)
-        power = march_power(
-            hero_atk_value,
+
+        support_atk_contrib = 0
+        support_speed_contrib = 0
+        support_command_contrib = 0
+        if support_row is not None:
+            support_level = int(support_row["level"])
+            support_atk_contrib = int(
+                atk_eff(support_row["rarity"], support_level) * SUPPORT_ATK_FRACTION
+            )
+            support_speed_contrib = int(
+                march_speed_pct(support_level) * SUPPORT_BUFF_FRACTION
+            )
+            support_command_contrib = int(
+                command_pct(support_level) * SUPPORT_BUFF_FRACTION
+            )
+
+        _, _, bond_bonus_pct = await _bond_state(
+            self.db, interaction.user.id, hero_id, support_hero_id,
+        )
+
+        base_power = march_power(
+            hero_atk_value + support_atk_contrib,
             troops,
             troop_attack_pct=int(player["troop_attack_pct"]),
-            hero_command_pct=hero_command,
+            hero_command_pct=hero_command + support_command_contrib,
         )
+        power = int(base_power * (100 + bond_bonus_pct) / 100)
+
         min_power = min_power_for_level(level)
         if power < min_power:
             await self.refresh(
@@ -750,16 +1013,22 @@ class HuntView(discord.ui.View):
             )
             return
 
-        leg_seconds = faux_march_seconds(level, hero_march_speed_pct=hero_speed)
+        leg_seconds = faux_march_seconds(
+            level, hero_march_speed_pct=hero_speed + support_speed_contrib,
+        )
         now = int(time.time())
         completes_at = now + 2 * leg_seconds
         async with self.db.conn.execute(
             """
             INSERT INTO hunt_marches
-              (discord_user_id, level, hero_id, started_at, completes_at, damage)
-            VALUES (?, ?, ?, ?, ?, ?)
+              (discord_user_id, level, hero_id, support_hero_id,
+               started_at, completes_at, damage)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (interaction.user.id, level, hero_id, now, completes_at, power),
+            (
+                interaction.user.id, level, hero_id, support_hero_id,
+                now, completes_at, power,
+            ),
         ) as cur:
             march_id = cur.lastrowid
         await self.db.conn.commit()
@@ -771,11 +1040,22 @@ class HuntView(discord.ui.View):
         # Outbound leg: hero travels to the mob.
         await asyncio.sleep(leg_seconds)
         engage_flash, summary = await _engage_march(self.db, int(march_id))
-        if summary.get("killed") and summary.get("hero_levels_gained"):
-            engage_flash = Flash.ok(
-                f"{engage_flash.message} Hero +{summary['hero_levels_gained']} lv "
-                f"(now Lv{summary['hero_level_after']})."
-            )
+        if summary.get("killed"):
+            extras: list[str] = []
+            if summary.get("hero_levels_gained"):
+                extras.append(
+                    f"Primary +{summary['hero_levels_gained']} lv "
+                    f"(now Lv{summary['hero_level_after']})"
+                )
+            if summary.get("support_levels_gained"):
+                extras.append(
+                    f"Support +{summary['support_levels_gained']} lv "
+                    f"(now Lv{summary['support_level_after']})"
+                )
+            if extras:
+                engage_flash = Flash.ok(
+                    f"{engage_flash.message} " + " · ".join(extras) + "."
+                )
         await self.refresh(interaction, flash=engage_flash)
 
         # Hero Diary DM (best-effort, fire-and-forget semantics).
@@ -849,7 +1129,8 @@ class HuntCog(commands.Cog):
         view = HuntView(self.db, interaction.user.id)
         await view.initialize()
         embed = await _render_embed(
-            self.db, interaction.user, view.selected_level, view.selected_hero_id
+            self.db, interaction.user, view.selected_level,
+            view.selected_hero_id, view.selected_support_hero_id
         )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
