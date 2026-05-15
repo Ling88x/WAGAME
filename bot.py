@@ -30,6 +30,7 @@ INITIAL_COGS = (
     "wagame.cogs.arena",
     "wagame.cogs.council",
     "wagame.cogs.bonds",
+    "wagame.cogs.inventory",
     "wagame.cogs.hub",
 )
 

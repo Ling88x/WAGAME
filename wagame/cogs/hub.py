@@ -465,6 +465,15 @@ class HubView(discord.ui.View):
         embeds = _build_page_embeds(interaction.user, rows, page=0)
         await interaction.response.edit_message(embeds=embeds, view=view)
 
+    @discord.ui.button(label="My Inventory", emoji="🎒", style=discord.ButtonStyle.secondary, row=1)
+    async def open_inventory(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        from wagame.cogs.inventory import render_inventory_embed
+        embed = await render_inventory_embed(self.db, interaction.user)
+        view = _BackOnlyView(self.db, self.owner_id)
+        await interaction.response.edit_message(embed=embed, view=view)
+
     @discord.ui.button(label="Get Heroes", emoji="✨", style=discord.ButtonStyle.secondary, row=1)
     async def open_summon(
         self, interaction: discord.Interaction, _: discord.ui.Button

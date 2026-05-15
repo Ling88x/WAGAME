@@ -406,10 +406,27 @@ class GatherView(discord.ui.View):
 
         await self._refresh(interaction, flash=Flash.ok(msg))
 
-        # Per-hero diary DMs after the panel refreshes.
+        # Per-hero diary DMs + hero XP grant for the gather hero.
         from wagame.cogs.council import record_contribution as council_record
         from wagame.cogs.diary import try_send_diary
+        from wagame.game.hero_levels import apply_xp_gain
         for hero_id, resource, amount in per_march:
+            # Hero XP: flat 50 per claimed march to the assigned hero.
+            if hero_id is not None:
+                async with self.db.conn.execute(
+                    "SELECT level, xp FROM owned_heroes "
+                    "WHERE discord_user_id = ? AND hero_id = ?",
+                    (interaction.user.id, hero_id),
+                ) as cur:
+                    h_row = await cur.fetchone()
+                if h_row is not None:
+                    res = apply_xp_gain(int(h_row["level"]), int(h_row["xp"]), 50)
+                    await self.db.conn.execute(
+                        "UPDATE owned_heroes SET level = ?, xp = ? "
+                        "WHERE discord_user_id = ? AND hero_id = ?",
+                        (res.new_level, res.new_xp, interaction.user.id, hero_id),
+                    )
+                await self.db.conn.commit()
             await try_send_diary(
                 interaction.client,  # type: ignore[arg-type]
                 self.db,

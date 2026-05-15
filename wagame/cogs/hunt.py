@@ -263,6 +263,31 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
         "tenebral_name": spec.name,
     }
 
+    # Hero XP grant — fires on every engagement so chips count too.
+    # Kills pay reward.xp; chips pay 1/10th rounded up. Keeps daily
+    # play visibly leveling heroes even when the mob isn't dropping.
+    if hero_id is not None:
+        reward_xp_full = kill_reward(level).xp
+        hero_xp_gain = reward_xp_full if killed else max(1, reward_xp_full // 10)
+        async with db.conn.execute(
+            "SELECT level, xp FROM owned_heroes "
+            "WHERE discord_user_id = ? AND hero_id = ?",
+            (user_id, hero_id),
+        ) as cur:
+            hero_row = await cur.fetchone()
+        if hero_row is not None:
+            lvl_result = apply_xp_gain(
+                int(hero_row["level"]), int(hero_row["xp"]), hero_xp_gain
+            )
+            await db.conn.execute(
+                "UPDATE owned_heroes SET level = ?, xp = ? "
+                "WHERE discord_user_id = ? AND hero_id = ?",
+                (lvl_result.new_level, lvl_result.new_xp, user_id, hero_id),
+            )
+            summary["hero_xp"] = hero_xp_gain
+            summary["hero_level_after"] = lvl_result.new_level
+            summary["hero_levels_gained"] = lvl_result.levels_gained
+
     if killed:
         reward = kill_reward(level)
         summary["reward"] = reward
@@ -275,25 +300,6 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
             "WHERE discord_user_id = ?",
             (reward.gold, reward.food, reward.wood, user_id),
         )
-        if hero_id is not None:
-            async with db.conn.execute(
-                "SELECT level, xp FROM owned_heroes "
-                "WHERE discord_user_id = ? AND hero_id = ?",
-                (user_id, hero_id),
-            ) as cur:
-                hero_row = await cur.fetchone()
-            if hero_row is not None:
-                lvl_result = apply_xp_gain(
-                    int(hero_row["level"]), int(hero_row["xp"]), reward.xp
-                )
-                await db.conn.execute(
-                    "UPDATE owned_heroes SET level = ?, xp = ? "
-                    "WHERE discord_user_id = ? AND hero_id = ?",
-                    (lvl_result.new_level, lvl_result.new_xp, user_id, hero_id),
-                )
-                summary["hero_xp"] = reward.xp
-                summary["hero_level_after"] = lvl_result.new_level
-                summary["hero_levels_gained"] = lvl_result.levels_gained
         kills_today = await _bump_daily(db, user_id)
         summary["kills_today"] = kills_today
 
@@ -344,7 +350,16 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
         if summary.get("hero_xp"):
             bits.append(f"+{int(summary['hero_xp']):,} hero XP.")
         if summary.get("shards_dropped"):
-            bits.append(f"+{summary['shards_dropped']} hero shards.")
+            sh_name = "—"
+            sh_id = summary.get("shard_hero_id")
+            if sh_id is not None:
+                async with db.conn.execute(
+                    "SELECT name FROM heroes WHERE id = ?", (sh_id,)
+                ) as cur:
+                    sh_row = await cur.fetchone()
+                if sh_row is not None:
+                    sh_name = sh_row["name"]
+            bits.append(f"+{summary['shards_dropped']} **{sh_name}** shards.")
         if summary.get("player_levels_gained"):
             bits.append(
                 f"📈 Player Lv {summary['player_level']} (+{summary['player_levels_gained']})."
