@@ -80,6 +80,22 @@ def march_speed_pct(level: int) -> int:
     return (level - 1) * MARCH_SPEED_PCT_PER_LEVEL
 
 
+SHARDS_PER_LEVELUP = 100
+
+
+def levels_per_hundred_shards(current_level: int) -> int:
+    """How many levels 100 spent shards convert to.
+
+    1-49 → +3, 50-99 → +2, 100+ → +1. Brackets snap to the current
+    level only — no smoothing across boundaries within one conversion.
+    """
+    if current_level < 50:
+        return 3
+    if current_level < 100:
+        return 2
+    return 1
+
+
 def command_pct(level: int) -> int:
     """Per-hero leadership buff (percent points) applied to whole march power."""
     if level < 1:

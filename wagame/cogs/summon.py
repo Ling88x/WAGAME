@@ -322,6 +322,82 @@ class SummonView(discord.ui.View):
         self.index = (self.index + 1) % len(self.hero_ids)
         await self._refresh(interaction)
 
+    @discord.ui.button(
+        label="Level Up (100 shards)", emoji="📈",
+        style=discord.ButtonStyle.primary, row=1,
+    )
+    async def levelup_btn(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        flash = await spend_shards_for_levelup(
+            self.db, interaction.user.id, self.current_hero_id,
+        )
+        await self._refresh(interaction, flash=flash)
+
+
+# -- shard → level conversion ----------------------------------------------
+
+
+async def spend_shards_for_levelup(
+    db: Database, user_id: int, hero_id: int,
+) -> Flash:
+    """Consume 100 shards to bump a hero's level by the tier-appropriate
+    amount (3 below lv50, 2 below 100, 1 at 100+). Clamped at the cap.
+    """
+    from wagame.game.hero_levels import (
+        SHARDS_PER_LEVELUP,
+        STARTING_LEVEL_CAP,
+        levels_per_hundred_shards,
+    )
+
+    async with db.conn.execute(
+        "SELECT level FROM owned_heroes "
+        "WHERE discord_user_id = ? AND hero_id = ?",
+        (user_id, hero_id),
+    ) as cur:
+        owned = await cur.fetchone()
+    if owned is None:
+        return Flash.err("You need to unlock the hero first (100 shards).")
+
+    current_level = int(owned["level"])
+    if current_level >= STARTING_LEVEL_CAP:
+        return Flash.info(
+            f"Hero is already at the level cap (Lv {STARTING_LEVEL_CAP})."
+        )
+
+    async with db.conn.execute(
+        "SELECT count FROM hero_shards "
+        "WHERE discord_user_id = ? AND hero_id = ?",
+        (user_id, hero_id),
+    ) as cur:
+        shard_row = await cur.fetchone()
+    shards = int(shard_row["count"]) if shard_row else 0
+    if shards < SHARDS_PER_LEVELUP:
+        need = SHARDS_PER_LEVELUP - shards
+        return Flash.err(
+            f"Need {need} more shards (have {shards}/{SHARDS_PER_LEVELUP})."
+        )
+
+    gain = levels_per_hundred_shards(current_level)
+    new_level = min(STARTING_LEVEL_CAP, current_level + gain)
+    actual_gain = new_level - current_level
+
+    await db.conn.execute(
+        "UPDATE hero_shards SET count = count - ? "
+        "WHERE discord_user_id = ? AND hero_id = ?",
+        (SHARDS_PER_LEVELUP, user_id, hero_id),
+    )
+    await db.conn.execute(
+        "UPDATE owned_heroes SET level = ? "
+        "WHERE discord_user_id = ? AND hero_id = ?",
+        (new_level, user_id, hero_id),
+    )
+    await db.conn.commit()
+    return Flash.ok(
+        f"📈 +{actual_gain} levels → Lv {new_level}. "
+        f"Spent {SHARDS_PER_LEVELUP} shards."
+    )
+
 
 # -- cog --------------------------------------------------------------------
 
