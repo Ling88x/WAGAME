@@ -897,7 +897,7 @@ class HuntView(discord.ui.View):
                 f"{engage_flash.message} Hero +{summary['hero_levels_gained']} lv "
                 f"(now Lv{summary['hero_level_after']})."
             )
-        await self.refresh(interaction, flash=engage_flash)
+        await self._refresh_if_still_here(interaction, flash=engage_flash)
 
         # Hero Bond: credit pair points if support hero was set.
         from wagame.cogs.bonds import record_bond
@@ -909,7 +909,25 @@ class HuntView(discord.ui.View):
         # Return leg: hero rides home; rewards already credited at engagement.
         await asyncio.sleep(leg_seconds)
         await _finalize_march(self.db, int(march_id))
-        await self.refresh(interaction)
+        await self._refresh_if_still_here(interaction)
+
+    async def _refresh_if_still_here(
+        self,
+        interaction: discord.Interaction,
+        flash: Flash | None = None,
+    ) -> None:
+        """Skip the post-sleep refresh if the player navigated to another
+        panel mid-march. The shared ephemeral message would otherwise
+        snap back to hunt and yank them out of whatever they're doing.
+        """
+        try:
+            msg = await interaction.original_response()
+        except (discord.NotFound, discord.HTTPException):
+            return
+        title = (msg.embeds[0].title or "") if msg.embeds else ""
+        if not title.startswith("🦌"):
+            return
+        await self.refresh(interaction, flash=flash)
 
     @discord.ui.button(label="Claim Daily", emoji="🎁", style=discord.ButtonStyle.success, row=0)
     async def claim_daily(
