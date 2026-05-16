@@ -247,6 +247,12 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
     level = int(march["level"])
     damage = int(march["damage"])
     hero_id = march["hero_id"]
+    # support_hero_id may not exist on rows written before mig 020;
+    # access defensively so cog_load drain of legacy marches still works.
+    try:
+        support_hero_id = march["support_hero_id"]
+    except (IndexError, KeyError):
+        support_hero_id = None
 
     spawn = await _spawn_or_get(db, user_id, level)
     spec = get_tenebral(level)
@@ -264,29 +270,34 @@ async def _engage_march(db: Database, march_id: int) -> tuple[Flash, dict]:
     }
 
     # Hero XP grant — fires on every engagement so chips count too.
-    # Kills pay reward.xp; chips pay 1/10th rounded up. Keeps daily
-    # play visibly leveling heroes even when the mob isn't dropping.
-    if hero_id is not None:
-        reward_xp_full = kill_reward(level).xp
-        hero_xp_gain = reward_xp_full if killed else max(1, reward_xp_full // 10)
+    # Kills pay reward.xp; chips pay 1/10th rounded up. Both primary
+    # and support (if set) grow — they both rode the march.
+    reward_xp_full = kill_reward(level).xp
+    hero_xp_gain = reward_xp_full if killed else max(1, reward_xp_full // 10)
+    for slot_hero_id in (hero_id, support_hero_id):
+        if slot_hero_id is None:
+            continue
         async with db.conn.execute(
             "SELECT level, xp FROM owned_heroes "
             "WHERE discord_user_id = ? AND hero_id = ?",
-            (user_id, hero_id),
+            (user_id, slot_hero_id),
         ) as cur:
-            hero_row = await cur.fetchone()
-        if hero_row is not None:
-            lvl_result = apply_xp_gain(
-                int(hero_row["level"]), int(hero_row["xp"]), hero_xp_gain
-            )
-            await db.conn.execute(
-                "UPDATE owned_heroes SET level = ?, xp = ? "
-                "WHERE discord_user_id = ? AND hero_id = ?",
-                (lvl_result.new_level, lvl_result.new_xp, user_id, hero_id),
-            )
+            h_row = await cur.fetchone()
+        if h_row is None:
+            continue
+        lvl_result = apply_xp_gain(
+            int(h_row["level"]), int(h_row["xp"]), hero_xp_gain
+        )
+        await db.conn.execute(
+            "UPDATE owned_heroes SET level = ?, xp = ? "
+            "WHERE discord_user_id = ? AND hero_id = ?",
+            (lvl_result.new_level, lvl_result.new_xp, user_id, slot_hero_id),
+        )
+        if slot_hero_id == hero_id:
             summary["hero_xp"] = hero_xp_gain
             summary["hero_level_after"] = lvl_result.new_level
             summary["hero_levels_gained"] = lvl_result.levels_gained
+    await db.conn.commit()
 
     if killed:
         reward = kill_reward(level)
@@ -861,10 +872,15 @@ class HuntView(discord.ui.View):
         async with self.db.conn.execute(
             """
             INSERT INTO hunt_marches
-              (discord_user_id, level, hero_id, started_at, completes_at, damage)
-            VALUES (?, ?, ?, ?, ?, ?)
+              (discord_user_id, level, hero_id, support_hero_id,
+               started_at, completes_at, damage)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (interaction.user.id, level, hero_id, now, completes_at, power),
+            (
+                interaction.user.id, level, hero_id,
+                self.selected_support_hero_id,
+                now, completes_at, power,
+            ),
         ) as cur:
             march_id = cur.lastrowid
         await self.db.conn.commit()
