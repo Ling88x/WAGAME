@@ -230,6 +230,15 @@ def _council_line(state: dict) -> str | None:
     )
 
 
+async def _has_active_sighting(db: Database, user_id: int) -> bool:
+    async with db.conn.execute(
+        "SELECT 1 FROM tenebral_sightings "
+        "WHERE discord_user_id = ? AND claimed = 0 LIMIT 1",
+        (user_id,),
+    ) as cur:
+        return await cur.fetchone() is not None
+
+
 def _sighting_line(state: dict) -> str | None:
     """Active Tenebral Sighting summary line, or None when no sighting."""
     row = state["sighting"]
@@ -247,6 +256,110 @@ def _sighting_line(state: dict) -> str | None:
 # -- rendering ------------------------------------------------------------
 
 
+def _short_num(n: int) -> str:
+    """Compact form: 12_345 → '12.3k', 1_234_567 → '1.23M'."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f}M".rstrip("0").rstrip(".")
+    if n >= 10_000:
+        return f"{n / 1_000:.1f}k".rstrip("0").rstrip(".")
+    return f"{n:,}"
+
+
+def _energy_bar(current: int, cap: int, width: int = 14) -> str:
+    fill = min(width, max(0, int(width * current / max(1, cap))))
+    return "█" * fill + "░" * (width - fill)
+
+
+def _action_lines(state: dict) -> list[str]:
+    """Things demanding a click right now — claim, done, ready."""
+    lines: list[str] = []
+
+    if state["daily_kills"] >= DAILY_QUOTA_KILLS and not state["daily_claimed"]:
+        lines.append("📅 **Daily quest** · ready to claim")
+
+    job = state["research_job"]
+    if job is not None and int(job["finishes_at"]) <= int(time.time()):
+        from wagame.research_data import get_node
+        node = get_node(job["node_codename"])
+        name = node.name if node else job["node_codename"]
+        lines.append(f"🔬 **{name} → Lv {int(job['target_level'])}** · done!")
+
+    tj = state["train_job"]
+    if tj is not None and int(tj["finishes_at"]) <= int(time.time()):
+        lines.append(f"🏰 **{int(tj['count']):,}x {tj['troop_name']}** · ready")
+
+    if state["gather_ready"] > 0:
+        lines.append(
+            f"⛏️ **{state['gather_ready']} gather(s)** · ready to claim"
+        )
+
+    if not state["vault_opened_today"]:
+        lines.append("🗝 **Vault** · ready to open")
+
+    return lines
+
+
+def _progress_lines(state: dict) -> list[str]:
+    """Things still ticking — hunt march, training, research, gather, council."""
+    lines: list[str] = []
+    now = int(time.time())
+
+    march = state["hunt_march"]
+    if march is not None:
+        spec = get_tenebral(int(march["level"]))
+        if march["engaged_at"] is None:
+            started = int(march["started_at"])
+            completes = int(march["completes_at"])
+            mid = started + (completes - started) // 2
+            lines.append(
+                f"🦌 🏇 Marching to Lv{spec.level} {spec.name} · engages <t:{mid}:R>"
+            )
+        else:
+            lines.append(
+                f"🦌 🛡️ Returning Lv{spec.level} {spec.name} · home "
+                f"<t:{int(march['completes_at'])}:R>"
+            )
+
+    if state["gather_count"] > 0 and state["gather_ready"] == 0:
+        earliest = state["gather_earliest"]
+        lines.append(
+            f"⛏️ {state['gather_count']} march(es) · claim <t:{earliest}:R>"
+        )
+
+    job = state["research_job"]
+    if job is not None and int(job["finishes_at"]) > now:
+        from wagame.research_data import get_node
+        node = get_node(job["node_codename"])
+        name = node.name if node else job["node_codename"]
+        lines.append(
+            f"🔬 {name} → Lv {int(job['target_level'])} · ready "
+            f"<t:{int(job['finishes_at'])}:R>"
+        )
+
+    tj = state["train_job"]
+    if tj is not None and int(tj["finishes_at"]) > now:
+        lines.append(
+            f"🏰 {int(tj['count']):,}x {tj['troop_name']} · ready "
+            f"<t:{int(tj['finishes_at'])}:R>"
+        )
+
+    quest = state["council_quest"]
+    if quest is not None:
+        from wagame.game.council import describe, unit_label
+        kind = quest["kind"]
+        target = int(quest["target"])
+        progress = int(quest["progress"])
+        pct = int(100 * progress / max(1, target))
+        your = state["council_user_amount"]
+        lines.append(
+            f"🏛 {describe(kind)} · {progress:,}/{target:,} "
+            f"{unit_label(kind)} ({pct}%) · you: {your:,} · "
+            f"<t:{int(quest['ends_at'])}:R>"
+        )
+
+    return lines
+
+
 async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embed:
     state = await _hub_state(db, user.id)
     player = state["player"]
@@ -255,41 +368,48 @@ async def render_hub_embed(db: Database, user: discord.abc.User) -> discord.Embe
     pl_level = int(player["player_level"])
     pl_title = title_for(pl_level)
     embed = discord.Embed(
-        title=f"🧙 {user.display_name}'s Campus",
+        title=f"🔥 {user.display_name}'s Campus · {pl_title} Lv {pl_level}",
         color=NEUTRAL_COLOR,
     )
     embed.set_thumbnail(url=user.display_avatar.url)
     embed.description = (
-        f"**{pl_title} · Lv {pl_level}**\n"
-        f"💰 {int(player['gold']):,}  ·  🍞 {int(player['food']):,}  ·  "
-        f"🌲 {int(player['wood']):,}  ·  💎 {int(player['gems']):,}\n"
-        f"⚡ Energy {state['energy']}/{ENERGY_CAP}"
+        f"💰 {_short_num(int(player['gold']))}  ·  "
+        f"🍞 {_short_num(int(player['food']))}  ·  "
+        f"🌲 {_short_num(int(player['wood']))}  ·  "
+        f"💎 {_short_num(int(player['gems']))}\n"
+        f"⚡ `{_energy_bar(state['energy'], ENERGY_CAP)}` "
+        f"{state['energy']}/{ENERGY_CAP}"
     )
 
+    # Sighting always surfaces (limited window, high priority).
     sighting_line = _sighting_line(state)
     if sighting_line:
         embed.add_field(name="🌙 Sighting", value=sighting_line, inline=False)
 
-    council_line = _council_line(state)
-    if council_line:
-        embed.add_field(name="🏛 Council", value=council_line, inline=False)
+    actions = _action_lines(state)
+    if actions:
+        embed.add_field(
+            name="⚠️ Action needed",
+            value="\n".join(actions),
+            inline=False,
+        )
 
-    embed.add_field(name="🦌 Hunt", value=_hunt_line(state), inline=False)
-    embed.add_field(name="⛏️ Gathering", value=_gather_line(state), inline=False)
-    embed.add_field(name="🔬 Research", value=_research_line(state), inline=False)
-    embed.add_field(name="🏰 Training", value=_train_line(state), inline=False)
-    embed.add_field(name="🗝 Vault", value=_vault_line(state), inline=False)
-    embed.add_field(name="📅 Daily quest", value=_quota_line(state), inline=True)
-    embed.add_field(
-        name="🎴 Heroes",
-        value=f"{state['heroes_count']} owned",
-        inline=True,
-    )
-    embed.add_field(
-        name="📜 Bestiary",
-        value=f"{state['bestiary_documented']}/12 tenebrals documented",
-        inline=True,
-    )
+    progress = _progress_lines(state)
+    if progress:
+        embed.add_field(
+            name="🕐 In progress",
+            value="\n".join(progress),
+            inline=False,
+        )
+
+    # Daily rhythm — only when streak is going (idle = hidden).
+    if state["vault_streak"] > 0 and state["vault_opened_today"]:
+        embed.add_field(
+            name="🔁 Daily",
+            value=f"🗝 Vault streak {state['vault_streak']} · opened today",
+            inline=False,
+        )
+
     return embed
 
 
@@ -349,7 +469,10 @@ class BackToHubButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         is_admin = await interaction.client.is_owner(interaction.user)
         embed = await render_hub_embed(self.db, interaction.user)
-        view = HubView(self.db, self.owner_id, is_admin=is_admin)
+        has_sighting = await _has_active_sighting(self.db, self.owner_id)
+        view = HubView(
+            self.db, self.owner_id, is_admin=is_admin, has_sighting=has_sighting,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
 
@@ -453,7 +576,13 @@ class _BackOnlyView(discord.ui.View):
 
 
 class HubView(discord.ui.View):
-    def __init__(self, db: Database, owner_id: int, is_admin: bool = False) -> None:
+    def __init__(
+        self,
+        db: Database,
+        owner_id: int,
+        is_admin: bool = False,
+        has_sighting: bool = False,
+    ) -> None:
         super().__init__(timeout=15 * 60)
         self.db = db
         self.owner_id = owner_id
@@ -462,6 +591,10 @@ class HubView(discord.ui.View):
             # The Admin button is declared statically below; strip it for
             # non-owners so it doesn't show up in the panel at all.
             self.remove_item(self.open_admin)
+        if not has_sighting:
+            # Hide the sighting button when nothing's active — the DM is
+            # the entry point when a real sighting fires.
+            self.remove_item(self.open_sighting)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
@@ -551,6 +684,16 @@ class HubView(discord.ui.View):
         view = _BackOnlyView(self.db, self.owner_id)
         await interaction.response.edit_message(embed=embed, view=view)
 
+    @discord.ui.button(label="Vault", emoji="🗝", style=discord.ButtonStyle.success, row=1)
+    async def open_vault(
+        self, interaction: discord.Interaction, _: discord.ui.Button
+    ) -> None:
+        from wagame.cogs.vault import VaultView, render_embed
+        view = VaultView(self.db, self.owner_id)
+        view.add_item(self._back())
+        embed = await render_embed(self.db, interaction.user)
+        await interaction.response.edit_message(embed=embed, view=view)
+
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, row=1)
     async def refresh(
         self, interaction: discord.Interaction, _: discord.ui.Button
@@ -564,16 +707,6 @@ class HubView(discord.ui.View):
     ) -> None:
         from wagame.cogs.bestiary import BestiaryView, render_embed
         view = BestiaryView(self.db, self.owner_id)
-        view.add_item(self._back())
-        embed = await render_embed(self.db, interaction.user)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-    @discord.ui.button(label="Vault", emoji="🗝", style=discord.ButtonStyle.success, row=2)
-    async def open_vault(
-        self, interaction: discord.Interaction, _: discord.ui.Button
-    ) -> None:
-        from wagame.cogs.vault import VaultView, render_embed
-        view = VaultView(self.db, self.owner_id)
         view.add_item(self._back())
         embed = await render_embed(self.db, interaction.user)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -649,7 +782,11 @@ class HubCog(commands.Cog):
     async def wa(self, interaction: discord.Interaction) -> None:
         await self.db.get_or_create_player(interaction.user.id)
         is_admin = await interaction.client.is_owner(interaction.user)
-        view = HubView(self.db, interaction.user.id, is_admin=is_admin)
+        has_sighting = await _has_active_sighting(self.db, interaction.user.id)
+        view = HubView(
+            self.db, interaction.user.id,
+            is_admin=is_admin, has_sighting=has_sighting,
+        )
         embed = await render_hub_embed(self.db, interaction.user)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
