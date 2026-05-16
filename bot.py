@@ -23,7 +23,6 @@ INITIAL_COGS = (
     "wagame.cogs.research",
     "wagame.cogs.summon",
     "wagame.cogs.hunt",
-    "wagame.cogs.diary",
     "wagame.cogs.sightings",
     "wagame.cogs.bestiary",
     "wagame.cogs.vault",

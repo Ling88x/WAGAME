@@ -865,36 +865,12 @@ class HuntView(discord.ui.View):
             )
         await self.refresh(interaction, flash=engage_flash)
 
-        # Hero Diary DM (best-effort, fire-and-forget semantics).
-        from wagame.cogs.diary import try_send_diary
-        diary_event = "hunt_kill" if summary.get("killed") else "hunt_chip"
-        await try_send_diary(
-            interaction.client,  # type: ignore[arg-type]
-            self.db,
-            user_id=interaction.user.id,
-            hero_id=hero_id,
-            event=diary_event,
-            context={
-                "mob": summary.get("tenebral_name", spec.name),
-                "level": level,
-            },
-        )
-
         # Hero Bond: credit pair points if support hero was set.
         from wagame.cogs.bonds import record_bond
         await record_bond(
             self.db, interaction.user.id, hero_id, self.selected_support_hero_id,
             killed=bool(summary.get("killed")),
         )
-        if summary.get("hero_levels_gained"):
-            await try_send_diary(
-                interaction.client,  # type: ignore[arg-type]
-                self.db,
-                user_id=interaction.user.id,
-                hero_id=hero_id,
-                event="level_up",
-                context={"level": summary.get("hero_level_after", 0)},
-            )
 
         # Return leg: hero rides home; rewards already credited at engagement.
         await asyncio.sleep(leg_seconds)

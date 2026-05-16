@@ -589,21 +589,6 @@ class SightingView(discord.ui.View):
                 f"(now Lv{summary['hero_level_after']})."
             )
 
-        # Diary DM hook — sighting kills get the same hunt_kill recap.
-        if summary.get("killed"):
-            from wagame.cogs.diary import try_send_diary
-            await try_send_diary(
-                interaction.client,  # type: ignore[arg-type]
-                self.db,
-                user_id=self.owner_id,
-                hero_id=int(self.selected_hero_id),
-                event="hunt_kill",
-                context={
-                    "mob": summary.get("tenebral_name", "Tenebral"),
-                    "level": summary.get("level", 1),
-                },
-            )
-
         await self.refresh(interaction, flash=flash)
 
     @discord.ui.button(label="Refresh", emoji="🔄", style=discord.ButtonStyle.secondary, row=0)

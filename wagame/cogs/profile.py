@@ -44,12 +44,8 @@ def _profile_embed(user: discord.abc.User, player) -> discord.Embed:
     embed.add_field(name="Wood", value=f"{player['wood']:,}", inline=True)
     embed.add_field(name="​", value="​", inline=True)
     daily = player["last_daily_claim_date"] or "never"
-    diary_state = "on" if int(player["diary_dm_enabled"]) else "off"
     embed.set_footer(
-        text=(
-            f"Joined {player['created_at']} UTC · "
-            f"Last daily: {daily} · Hero Diary: {diary_state} (`/settings diary`)"
-        )
+        text=f"Joined {player['created_at']} UTC · Last daily: {daily}"
     )
     return embed
 

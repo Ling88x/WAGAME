@@ -353,6 +353,87 @@ class BackToHubButton(discord.ui.Button):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
+class HeroesTabButton(discord.ui.Button):
+    """One of the three tabs (Roster / Summon / Shards) injected into
+    every Heroes sub-view so the player can flip between them without
+    going back to the hub first."""
+
+    def __init__(
+        self, db: Database, owner_id: int, target: str, current: str,
+    ) -> None:
+        labels = {"roster": ("🎴", "Roster"), "summon": ("✨", "Summon"),
+                  "shards": ("🎒", "Shards")}
+        emoji, label = labels[target]
+        style = (
+            discord.ButtonStyle.primary if target == current
+            else discord.ButtonStyle.secondary
+        )
+        super().__init__(label=label, emoji=emoji, style=style, row=2,
+                         disabled=(target == current))
+        self.db = db
+        self.owner_id = owner_id
+        self.target = target
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await _open_heroes_tab(interaction, self.db, self.owner_id, tab=self.target)
+
+
+def _attach_heroes_tabs(
+    view: discord.ui.View, db: Database, owner_id: int, current: str,
+) -> None:
+    for tab in ("roster", "summon", "shards"):
+        view.add_item(HeroesTabButton(db, owner_id, tab, current))
+    view.add_item(BackToHubButton(db, owner_id))
+
+
+async def _open_heroes_tab(
+    interaction: discord.Interaction,
+    db: Database,
+    owner_id: int,
+    *,
+    tab: str,
+) -> None:
+    """Build the right sub-view for the requested tab and swap in place."""
+    if tab == "roster":
+        from wagame.cogs.heroes import HeroesView, _build_page_embeds, _fetch_owned
+        rows = await _fetch_owned(db, owner_id)
+        view = HeroesView(db, owner_id, total=len(rows))
+        _attach_heroes_tabs(view, db, owner_id, current="roster")
+        embeds = _build_page_embeds(interaction.user, rows, page=0)
+        await interaction.response.edit_message(embeds=embeds, view=view)
+        return
+
+    if tab == "summon":
+        from wagame.cogs.summon import (
+            SummonView,
+            _fetch_hero_by_id,
+            _render_embed,
+            fetch_roster,
+        )
+        hero_ids = await fetch_roster(db)
+        if not hero_ids:
+            embed = await _render_summon_picker_embed(db, interaction.user)
+            view = _BackOnlyView(db, owner_id)
+            await interaction.response.edit_message(embed=embed, view=view)
+            return
+        view = SummonView(db, owner_id, hero_ids, index=0)
+        _attach_heroes_tabs(view, db, owner_id, current="summon")
+        hero_row = await _fetch_hero_by_id(db, view.current_hero_id)
+        embed = await _render_embed(
+            db, interaction.user, hero_row,
+            index=view.index, total=len(hero_ids),
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+        return
+
+    # tab == "shards"
+    from wagame.cogs.inventory import render_inventory_embed
+    embed = await render_inventory_embed(db, interaction.user)
+    view = discord.ui.View(timeout=15 * 60)
+    _attach_heroes_tabs(view, db, owner_id, current="shards")
+    await interaction.response.edit_message(embed=embed, view=view)
+
+
 class _BackOnlyView(discord.ui.View):
     """Static-content subpanels (profile, summon picker) need only Back."""
 
@@ -454,50 +535,11 @@ class HubView(discord.ui.View):
         )
         await interaction.response.edit_message(embed=embed, view=view)
 
-    @discord.ui.button(label="Your Heroes", emoji="🎴", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Heroes", emoji="🎴", style=discord.ButtonStyle.secondary, row=1)
     async def open_heroes(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
-        from wagame.cogs.heroes import HeroesView, _build_page_embeds, _fetch_owned
-        rows = await _fetch_owned(self.db, self.owner_id)
-        view = HeroesView(self.db, self.owner_id, total=len(rows))
-        view.add_item(self._back())
-        embeds = _build_page_embeds(interaction.user, rows, page=0)
-        await interaction.response.edit_message(embeds=embeds, view=view)
-
-    @discord.ui.button(label="My Inventory", emoji="🎒", style=discord.ButtonStyle.secondary, row=1)
-    async def open_inventory(
-        self, interaction: discord.Interaction, _: discord.ui.Button
-    ) -> None:
-        from wagame.cogs.inventory import render_inventory_embed
-        embed = await render_inventory_embed(self.db, interaction.user)
-        view = _BackOnlyView(self.db, self.owner_id)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-    @discord.ui.button(label="Get Heroes", emoji="✨", style=discord.ButtonStyle.secondary, row=1)
-    async def open_summon(
-        self, interaction: discord.Interaction, _: discord.ui.Button
-    ) -> None:
-        from wagame.cogs.summon import (
-            SummonView,
-            _fetch_hero_by_id,
-            _render_embed,
-            fetch_roster,
-        )
-        hero_ids = await fetch_roster(self.db)
-        if not hero_ids:
-            embed = await _render_summon_picker_embed(self.db, interaction.user)
-            view = _BackOnlyView(self.db, self.owner_id)
-            await interaction.response.edit_message(embed=embed, view=view)
-            return
-        view = SummonView(self.db, self.owner_id, hero_ids, index=0)
-        view.add_item(self._back())
-        hero_row = await _fetch_hero_by_id(self.db, view.current_hero_id)
-        embed = await _render_embed(
-            self.db, interaction.user, hero_row,
-            index=view.index, total=len(hero_ids),
-        )
-        await interaction.response.edit_message(embed=embed, view=view)
+        await _open_heroes_tab(interaction, self.db, self.owner_id, tab="roster")
 
     @discord.ui.button(label="My Profile", emoji="👤", style=discord.ButtonStyle.secondary, row=1)
     async def open_profile(
