@@ -467,11 +467,17 @@ async def _render_embed(
         hero_atk_value = atk_eff(hero_row["rarity"], hero_level)
         hero_speed = march_speed_pct(hero_level)
         hero_command = command_pct(hero_level)
+    support_atk_value = 0
+    support_command = 0
+    if support_row is not None:
+        s_level = int(support_row["level"])
+        support_atk_value = atk_eff(support_row["rarity"], s_level)
+        support_command = command_pct(s_level)
     base_power = march_power(
-        hero_atk_value,
+        hero_atk_value + support_atk_value,
         troops,
         troop_attack_pct=troop_attack_pct,
-        hero_command_pct=hero_command,
+        hero_command_pct=hero_command + support_command,
     )
     from wagame.cogs.bonds import bond_bonus_pct_for
     bond_pct = await bond_bonus_pct_for(
@@ -509,12 +515,14 @@ async def _render_embed(
     troops_total = sum(t.count for t in troops)
     troops_atk_sum = sum(t.attack_contribution for t in troops)
     bond_suffix = f" · 🔗 +{bond_pct}% bond" if bond_pct else ""
+    hero_breakdown = (
+        f"Hero {hero_atk_value:,}"
+        + (f" + Support {support_atk_value:,}" if support_atk_value else "")
+        + f" + Troops {troops_atk_sum:,} ({troops_total:,} units)"
+    )
     embed.add_field(
         name=f"⚔️ March Power {power:,}",
-        value=(
-            f"Hero {hero_atk_value:,} + Troops {troops_atk_sum:,} "
-            f"({troops_total:,} units){bond_suffix}"
-        ),
+        value=hero_breakdown + bond_suffix,
         inline=False,
     )
 
@@ -616,7 +624,7 @@ class LevelSelect(discord.ui.Select):
             )
             for t in TENEBRAL_TABLE
         ]
-        super().__init__(placeholder="Target level", options=options, row=2)
+        super().__init__(placeholder="Target level", options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view: HuntView = self.view  # type: ignore[assignment]
@@ -637,7 +645,7 @@ class HeroSelect(discord.ui.Select):
                 )
             ]
             super().__init__(
-                placeholder="No heroes owned", options=options, row=3, disabled=True
+                placeholder="No heroes owned", options=options, row=2, disabled=True
             )
             return
 
@@ -651,7 +659,7 @@ class HeroSelect(discord.ui.Select):
                     default=(current is not None and int(row["id"]) == current),
                 )
             )
-        super().__init__(placeholder="March hero", options=options, row=3)
+        super().__init__(placeholder="March hero", options=options, row=2)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view: HuntView = self.view  # type: ignore[assignment]
@@ -689,7 +697,7 @@ class SupportHeroSelect(discord.ui.Select):
                     default=(current is not None and hero_id == current),
                 )
             )
-        super().__init__(placeholder="Support hero (optional)", options=options, row=1)
+        super().__init__(placeholder="Support hero (optional)", options=options, row=3)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view: HuntView = self.view  # type: ignore[assignment]
@@ -807,11 +815,21 @@ class HuntView(discord.ui.View):
         hero_atk_value = atk_eff(hero_row["rarity"], hero_level)
         hero_speed = march_speed_pct(hero_level)
         hero_command = command_pct(hero_level)
+        support_atk_value = 0
+        support_command = 0
+        if self.selected_support_hero_id is not None:
+            support_row = await _hero_by_id(
+                self.db, interaction.user.id, self.selected_support_hero_id,
+            )
+            if support_row is not None:
+                s_level = int(support_row["level"])
+                support_atk_value = atk_eff(support_row["rarity"], s_level)
+                support_command = command_pct(s_level)
         base_power = march_power(
-            hero_atk_value,
+            hero_atk_value + support_atk_value,
             troops,
             troop_attack_pct=int(player["troop_attack_pct"]),
-            hero_command_pct=hero_command,
+            hero_command_pct=hero_command + support_command,
         )
         from wagame.cogs.bonds import bond_bonus_pct_for
         bond_pct = await bond_bonus_pct_for(
